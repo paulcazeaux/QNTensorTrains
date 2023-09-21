@@ -113,7 +113,9 @@ function Base.axes(A::SparseCore)
   return (A.row_qn, 1:2, A.col_qn)
 end
 
-function isnonzero(A::SparseCore, l::Int, s::Int, r::Int)
+@propagate_inbounds function isnonzero(A::SparseCore, l::Int, s::Int, r::Int)
+  @boundscheck checkbounds(A, l,s,r)
+
   if s==1 && r == l # Unoccupied state
     return isnonzero(A.unoccupied[l])
   elseif s==2 && l+1 == r # Occupied state
@@ -123,7 +125,9 @@ function isnonzero(A::SparseCore, l::Int, s::Int, r::Int)
   end
 end
 
-function isnonzero(A::SparseCore, l::Int, r::Int)
+@propagate_inbounds function isnonzero(A::SparseCore, l::Int, r::Int)
+  @boundscheck checkbounds(A, l,r-l+1,r)
+
   if r == l # Unoccupied state
     return isnonzero(A.unoccupied[l])
   elseif l+1 == r # Occupied state
@@ -133,7 +137,7 @@ function isnonzero(A::SparseCore, l::Int, r::Int)
   end
 end
 
-function Base.getindex(A::SparseCore{T}, l::Int, s::Int, r::Int) where T<:Number
+@propagate_inbounds function Base.getindex(A::SparseCore{T}, l::Int, s::Int, r::Int) where T<:Number
   @boundscheck checkbounds(A, l,s,r)
 
   if s==1 && r == l # Unoccupied state
@@ -145,7 +149,7 @@ function Base.getindex(A::SparseCore{T}, l::Int, s::Int, r::Int) where T<:Number
   end
 end
 
-function Base.getindex(A::SparseCore{T}, l::Int, r::Int) where T<:Number
+@propagate_inbounds function Base.getindex(A::SparseCore{T}, l::Int, r::Int) where T<:Number
   @boundscheck checkbounds(A, l,r-l+1,r)
 
   if r == l # Unoccupied state
@@ -157,7 +161,7 @@ function Base.getindex(A::SparseCore{T}, l::Int, r::Int) where T<:Number
   end
 end
 
-function Base.getindex(A::SparseCore, n::Int, unfolding::Symbol)
+@propagate_inbounds function Base.getindex(A::SparseCore, n::Int, unfolding::Symbol)
   @assert unfolding == :horizontal || unfolding == :vertical ||
           unfolding == :R          || unfolding == :L
 
@@ -170,19 +174,19 @@ function Base.getindex(A::SparseCore, n::Int, unfolding::Symbol)
   end
 end
 
-function Base.setindex!(A::SparseCore{T}, X::Matrix{T}, l::Int,r::Int) where T<:Number
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::Matrix{T}, l::Int,r::Int) where T<:Number
   Base.setindex!(A,Block(X),l,r-l+1,r)
 end
 
-function Base.setindex!(A::SparseCore{T}, X::Block{T}, l::Int,r::Int) where T<:Number
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::Block{T}, l::Int,r::Int) where T<:Number
   Base.setindex!(A,X,l,r-l+1,r)
 end
 
-function Base.setindex!(A::SparseCore{T}, X::Matrix{T}, l::Int,s::Int,r::Int) where T<:Number
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::Matrix{T}, l::Int,s::Int,r::Int) where T<:Number
   Base.setindex!(A,Block(X),l,s,r)
 end
 
-function Base.setindex!(A::SparseCore{T}, X::Block{T}, l::Int,s::Int,r::Int) where T<:Number
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::Block{T}, l::Int,s::Int,r::Int) where T<:Number
   @boundscheck begin
     checkbounds(A, l,s,r)
     size(X) == (A.row_ranks[l],A.col_ranks[r]) || 
@@ -198,7 +202,7 @@ function Base.setindex!(A::SparseCore{T}, X::Block{T}, l::Int,s::Int,r::Int) whe
   end
 end
 
-function Base.setindex!(A::SparseCore{T,N,d}, X::Matrix{T}, n::Int, unfolding::Symbol) where {T<:Number,N,d}
+@propagate_inbounds function Base.setindex!(A::SparseCore{T,N,d}, X::Matrix{T}, n::Int, unfolding::Symbol) where {T<:Number,N,d}
   @assert unfolding == :horizontal || unfolding == :vertical ||
           unfolding == :R          || unfolding == :L
 
@@ -348,7 +352,7 @@ function Base.summary(A::SparseCore{T,N,d}) where {T<:Number,N,d}
   return string("[$(axes(A,1)[begin]):$(axes(A,1)[end])]x$(size(A,2))x[$(axes(A,3)[begin]):$(axes(A,3)[end])] SparseCore{$(T),$(N),$(d)})")
 end
 
-function LinearAlgebra.lmul!(a::Number, B::SparseCore{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.lmul!(a::Number, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   for n in axes(B.unoccupied,1)
     lmul!(T(a), B.unoccupied[n])
   end
@@ -358,11 +362,11 @@ function LinearAlgebra.lmul!(a::Number, B::SparseCore{T,N,d}) where {T<:Number,N
   return B
 end
 
-function LinearAlgebra.rmul!(B::SparseCore{T,N,d}, a::Number) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.rmul!(B::SparseCore{T,N,d}, a::Number) where {T<:Number,N,d}
   return lmul!(a,B)
 end
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, b::Number) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, b::Number) where {T<:Number,N,d}
   C.row_ranks .= A.row_ranks
   C.col_ranks .= A.col_ranks
 
@@ -375,7 +379,7 @@ function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, b::Numbe
   return C
 end
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, a::Number, B::SparseCore{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, a::Number, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   C.row_ranks .= B.row_ranks
   C.col_ranks .= B.col_ranks
 
@@ -402,7 +406,7 @@ function Base.:-(A::SparseCore)
   return lmul!(-1, deepcopy(A))
 end
 
-function LinearAlgebra.lmul!(A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.lmul!(A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   @assert B.k == 1
   @assert size(A,2) == B.row_ranks[0]
 
@@ -417,7 +421,7 @@ function LinearAlgebra.lmul!(A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {
   return B
 end
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   @assert C.k == B.k == 1
   @assert size(A,2) == B.row_ranks[0]
 
@@ -437,7 +441,7 @@ function Base.:*(A::Mat, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:Abstrac
   return mul!(SparseCore{T,N,d}(1), A, B)
 end
 
-function LinearAlgebra.lmul!(A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.lmul!(A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @boundscheck begin
     length(A) == B.m      || throw(DimensionMismatch("Number of matrices $(length(A)) does not match the number of block rows $(size(B,1))"))
     axes(A,1) == axes(B,1)|| throw(DimensionMismatch("Axes mismatch between matrices $(summary(axis(A,1))) and core row indices $(summary(axis(B,1)))"))
@@ -457,7 +461,7 @@ function LinearAlgebra.lmul!(A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,
 end
 
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @boundscheck begin
     length(A) == B.m      || throw(DimensionMismatch("Number of matrices $(length(A)) does not match the number of block rows $(size(B,1))"))
     axes(A,1) == axes(B,1)|| throw(DimensionMismatch("Axes mismatch between matrices $(summary(axis(A,1))) and core row indices $(summary(axis(B,1)))"))
@@ -482,7 +486,7 @@ function Base.:*(A::OffsetVector{Mat, Vector{Mat}}, B::SparseCore{T,N,d}) where 
   return mul!(SparseCore{T,N,d}(B.k), A, B)
 end
 
-function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{Mat}}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{Mat}}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @boundscheck begin
     size(A,3) == length(B)|| throw(DimensionMismatch("Number of matrices $(length(B)) does not match the number of block columns $(size(B,3))"))
     axes(A,3) == axes(B,1)|| throw(DimensionMismatch("Axes mismatch between core column indices $(summary(axis(B,3))) and matrices $(summary(axis(A,1)))"))
@@ -501,7 +505,7 @@ function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{M
   return A
 end
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{Mat}}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{Mat}}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @boundscheck begin
     size(A,3) == length(B)|| throw(DimensionMismatch("Number of matrices $(length(B)) does not match the number of block columns $(size(B,3))"))
     axes(A,3) == axes(B,1)|| throw(DimensionMismatch("Axes mismatch between core column indices $(summary(axis(B,3))) and matrices $(summary(axis(A,1)))"))
@@ -526,7 +530,7 @@ function Base.:*(A::SparseCore{T,N,d}, B::OffsetVector{Mat, Vector{Mat}}) where 
   return mul!(SparseCore{T,N,d}(A.k), A, B)
 end
 
-function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @assert A.k == d
   @assert A.col_ranks[N] = size(B,1)
 
@@ -542,9 +546,9 @@ function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,
   return A
 end
 
-function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
-  @assert C.k == A.k == d
-  @assert A.col_ranks[N] = size(B,1)
+@propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+  @boundscheck @assert C.k == A.k == d
+  @boundscheck @assert A.col_ranks[N] = size(B,1)
 
   for n in axes(A.unoccupied, 1)
     C.unoccupied[n] = A.unoccupied[n] * B
@@ -560,12 +564,12 @@ function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::Mat) 
 end
 
 function Base.:*(A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
-  @assert A.k == d
+  @boundscheck @assert A.k == d
   return mul!(SparseCore{T,N,d}(d), A, B)
 end
 
 function ⊕(A::SparseCore{T,N,d}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @assert A.k == B.k
+  @boundscheck @assert A.k == B.k
   k = A.k
   if d>1
     if k==1
@@ -596,27 +600,27 @@ function ⊕(A::SparseCore{T,N,d}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   return SparseCore{T,N,d}(k,size(A,1),size(A,3),axes(A,1),axes(A,3),row_ranks,col_ranks,unoccupied,occupied)
 end
 
-function LinearAlgebra.axpy!(α, v::SparseCore{T,N,d}, w::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @assert v.row_ranks == w.row_ranks
-  @assert v.col_ranks == w.col_ranks
+@propagate_inbounds function LinearAlgebra.axpy!(α, v::SparseCore{T,N,d}, w::SparseCore{T,N,d}) where {T<:Number,N,d}
+  @boundscheck @assert v.row_ranks == w.row_ranks
+  @boundscheck @assert v.col_ranks == w.col_ranks
 
   axpy!.(α, v.unoccupied, w.unoccupied)
   axpy!.(α, v.occupied, w.occupied)
   return w
 end
 
-function LinearAlgebra.axpby!(α, v::SparseCore{T,N,d}, β, w::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @assert v.row_ranks == w.row_ranks
-  @assert v.col_ranks == w.col_ranks
+@propagate_inbounds function LinearAlgebra.axpby!(α, v::SparseCore{T,N,d}, β, w::SparseCore{T,N,d}) where {T<:Number,N,d}
+  @boundscheck @assert v.row_ranks == w.row_ranks
+  @boundscheck @assert v.col_ranks == w.col_ranks
 
   axpy!.(α, v.unoccupied, β, w.unoccupied)
   axpy!.(α, v.occupied, β, w.occupied)
   return w
 end
 
-function LinearAlgebra.dot(v::SparseCore{T,N,d}, w::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @assert v.row_ranks == w.row_ranks
-  @assert v.col_ranks == w.col_ranks
+@propagate_inbounds function LinearAlgebra.dot(v::SparseCore{T,N,d}, w::SparseCore{T,N,d}) where {T<:Number,N,d}
+  @boundscheck @assert v.row_ranks == w.row_ranks
+  @boundscheck @assert v.col_ranks == w.col_ranks
 
   s = T(0)
   for (V,W) in zip(v.unoccupied, w.unoccupied)

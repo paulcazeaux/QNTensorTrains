@@ -76,7 +76,7 @@ function Base.Array(b::Block{T}) where T<:Number
   end
 end
 
-function Base.getindex(a::Block{T}, i::Int, j::Int) where T<:Number
+@propagate_inbounds function Base.getindex(a::Block{T}, i::Int, j::Int) where T<:Number
   if isnonzero(a)
     return factor(a).*data(a)[i,j]
   else
@@ -84,11 +84,11 @@ function Base.getindex(a::Block{T}, i::Int, j::Int) where T<:Number
   end
 end
 
-function Base.getindex(b::Block{T}, I::AbstractRange, J::AbstractRange) where T<:Number
+@propagate_inbounds function Base.getindex(b::Block{T}, I::AbstractRange, J::AbstractRange) where T<:Number
   return Block{T}(b.m,b.n,b.factor, data(b)[I,J])
 end
 
-function Base.setindex!(x::AbstractMatrix{T}, b::Block{T}, I...) where T<:Number
+@propagate_inbounds function Base.setindex!(x::AbstractMatrix{T}, b::Block{T}, I::Vararg{Int,n}) where {T<:Number,n}
   if isnonzero(b)
     setindex!(x, data(b), I...)
     lmul!(factor(b), view(x, I...))
@@ -103,7 +103,7 @@ function zeros_block(::Type{T}, m::Int, n::Int) where T<:Number
   return Block{T}(m,n)
 end
 
-function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::Block{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::Block{T}) where T<:Number
   @boundscheck @assert size(x) == size(y)
   if isnonzero(x)
     axpby!(α*factor(x), data(x), factor(y), data(y))
@@ -112,7 +112,7 @@ function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::Block{T}) where T<:Numb
   return y
 end
 
-function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::Block{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::Block{T}) where T<:Number
   @boundscheck @assert size(x) == size(y)
   if isnonzero(x)
     axpby!(α*factor(x), data(x), β*factor(y), data(y))
@@ -124,7 +124,7 @@ function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::Block{T}) 
 end
 
 
-function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::AbstractMatrix{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::AbstractMatrix{T}) where T<:Number
   @boundscheck @assert size(x) == size(y)
   if isnonzero(x)
     axpy!(α*factor(x),data(x),y)
@@ -132,7 +132,7 @@ function LinearAlgebra.axpy!(α::Number, x::Block{T}, y::AbstractMatrix{T}) wher
   return y
 end
 
-function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::AbstractMatrix{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::AbstractMatrix{T}) where T<:Number
   @boundscheck @assert size(x) == size(y)
   if isnonzero(x)
     axpby!(α*factor(x),data(x),β,y)
@@ -142,7 +142,7 @@ function LinearAlgebra.axpby!(α::Number, x::Block{T}, β::Number, y::AbstractMa
   return y
 end
 
-function Base.:+(x::Block{T}, y::Block{T}) where T<:Number
+@propagate_inbounds function Base.:+(x::Block{T}, y::Block{T}) where T<:Number
   @boundscheck @assert size(x) == size(y)
   if isnonzero(x) && isnonzero(y)
     return Block(factor(x).*data(x).+factor(y).*data(y))
@@ -186,7 +186,7 @@ function LinearAlgebra.:*(a::Block, β::Number)
   return rmul!(c, β)
 end
 
-function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::AbstractMatrix{T}, B::Block{T}, α::Number=1, β::Number=0) where T<:Number
+@propagate_inbounds function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::AbstractMatrix{T}, B::Block{T}, α::Number=1, β::Number=0) where T<:Number
   if isnonzero(B)
     return mul!(C, A, data(B), α*factor(B), β)
   else
@@ -194,7 +194,7 @@ function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::AbstractMatrix{T}, B::Block
   end
 end
 
-function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::Block{T}, B::AbstractMatrix{T}, α::Number=1, β::Number=0) where T<:Number
+@propagate_inbounds function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::Block{T}, B::AbstractMatrix{T}, α::Number=1, β::Number=0) where T<:Number
   if isnonzero(A)
     mul!(C, data(A), B, α*factor(A), β)
   else
@@ -203,7 +203,7 @@ function LinearAlgebra.mul!(C::AbstractMatrix{T}, A::Block{T}, B::AbstractMatrix
   return C
 end
 
-function LinearAlgebra.mul!(C::Block{T}, A::AbstractMatrix{T}, B::Block{T}, α::Number=1, β::Number=0) where T<:Number
+@propagate_inbounds function LinearAlgebra.mul!(C::Block{T}, A::AbstractMatrix{T}, B::Block{T}, α::Number=1, β::Number=0) where T<:Number
   if isnonzero(B)
     mul!(data(C), A, data(B), α*factor(B), β*factor(C))
     C.factor = T(1) 
@@ -213,7 +213,7 @@ function LinearAlgebra.mul!(C::Block{T}, A::AbstractMatrix{T}, B::Block{T}, α::
   return C
 end
 
-function LinearAlgebra.mul!(C::Block{T}, A::Block{T}, B::AbstractMatrix{T}, α::Number=1, β::Number=0) where T<:Number
+@propagate_inbounds function LinearAlgebra.mul!(C::Block{T}, A::Block{T}, B::AbstractMatrix{T}, α::Number=1, β::Number=0) where T<:Number
   if isnonzero(A)
     mul!(C.array, data(A), B, α*factor(A), β*factor(C))
     C.factor = T(1)
@@ -223,7 +223,7 @@ function LinearAlgebra.mul!(C::Block{T}, A::Block{T}, B::AbstractMatrix{T}, α::
   return C
 end
 
-function contract!(C::AbstractMatrix{T}, A::Block{T}, B::Block{T},α::Number=1,β::Number=0) where T<:Number
+@propagate_inbounds function contract!(C::AbstractMatrix{T}, A::Block{T}, B::Block{T},α::Number=1,β::Number=0) where T<:Number
   if isnonzero(A) && isnonzero(B)
     return mul!(C, data(A),data(B),factor(A)*factor(B)*T(α),T(β))
   else
@@ -231,7 +231,7 @@ function contract!(C::AbstractMatrix{T}, A::Block{T}, B::Block{T},α::Number=1,�
   end
 end
 
-function LinearAlgebra.:*(A::Union{Matrix{T},Diagonal{T}}, B::Block{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.:*(A::Union{Matrix{T},Diagonal{T}}, B::Block{T}) where T<:Number
   if isnonzero(B)
     return Block{T}(size(A,1),size(B,2),B.factor,A*data(B))
   else
@@ -239,7 +239,7 @@ function LinearAlgebra.:*(A::Union{Matrix{T},Diagonal{T}}, B::Block{T}) where T<
   end
 end
 
-function LinearAlgebra.:*(A::Block{T}, B::Union{Matrix{T},Diagonal{T}}) where T<:Number
+@propagate_inbounds function LinearAlgebra.:*(A::Block{T}, B::Union{Matrix{T},Diagonal{T}}) where T<:Number
   if isnonzero(A)
     return Block{T}(size(A,1),size(B,2),A.factor,data(A)*B)
   else
@@ -263,7 +263,7 @@ function norm2(x::Block{T}) where T<:Number
   end
 end
 
-function LinearAlgebra.dot(x::Block{T},y::Block{T}) where T<:Number
+@propagate_inbounds function LinearAlgebra.dot(x::Block{T},y::Block{T}) where T<:Number
   if isnonzero(x) && isnonzero(y)
     return conj(factor(x))*factor(y) * dot(data(x), data(y))
   else

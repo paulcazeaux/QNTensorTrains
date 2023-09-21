@@ -8,6 +8,7 @@ conserving total fermionic particle number.
 module QNTensorTrains
 
 using LinearAlgebra
+import Base: @propagate_inbounds
 
 include("base/util.jl")
 include("base/block.jl")
