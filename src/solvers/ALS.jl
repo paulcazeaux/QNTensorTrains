@@ -90,13 +90,13 @@ function FramedHamiltonian( Xₖ::SparseCore{T,N,d},
                              v::Array{T,4},
                             Wᴸ::OffsetVector{Matrix{T},Vector{Matrix{T}}}, 
                             Wᴿ::OffsetVector{Matrix{T},Vector{Matrix{T}}}) where {T<:Number,N,d}
-  HXₖ = sparse_H_mult(Xₖ, t, v)
+  HXₖ = sparse_H_matvec(Xₖ, t, v)
   Yₖ = similar(Xₖ)
   for l in axes(Yₖ,1), r in axes(Yₖ,3) ∩ (l:l+1)
     Yₖ[l,r] = zeros(T,Yₖ.row_ranks[l],Yₖ.col_ranks[r])
     for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
-      if isnonzero(V[l,r])
-        W = adjoint(Wᴸ[l][I[l],:]) * V[l,r] * Wᴿ[r][J[r],:]
+      if isnonzero(V,l,r)
+        W = Wᴸ[l][:,I[l]] * V[l,r] * Wᴿ[r][J[r],:]
         Yₖ[l,r] += W
       end
     end
@@ -130,19 +130,19 @@ function FramingStepRight(t::Matrix{T}, v::Array{T,4},
                           x::TTvector{T,N,d}, k::Int, 
                           Wᴸ::OffsetVector{Matrix{T},Vector{Matrix{T}}}) where {T<:Number,N,d}
     Xₖ = x.cores[k]
-    HXₖ = sparse_H_mult(Xₖ,t,v)
+    HXₖ = sparse_H_matvec(Xₖ,t,v)
 
     Wᴸ⁺¹ = OffsetVector([Matrix{T}(undef,0,0) for l in 0:N], 0:N)
     for r in axes(Xₖ,3)
-      Wᴸ⁺¹[r] = zeros(T, HXₖ[2][r], Xₖ.col_ranks[r])
+      Wᴸ⁺¹[r] = zeros(T, Xₖ.col_ranks[r], HXₖ[2][r])
       for l in axes(Xₖ,1) ∩ (r-1:r)
-        if isnonzero(Xₖ[l,r])
+        if isnonzero(Xₖ,l,r)
           for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
-            if isnonzero(V[l,r])
-              mul!( view(Wᴸ⁺¹[r], J[r], :), 
-                    adjoint(data(V[l,r])) * Wᴸ[l][I[l],:],
-                    data(Xₖ[l,r]),
-                    conj(factor(V[l,r])) * factor(Xₖ[l,r]),
+            if isnonzero(V,l,r)
+              mul!( view(Wᴸ⁺¹[r], :, J[r]), 
+                    adjoint(data(Xₖ[l,r])) * Wᴸ[l][:,I[l]],
+                    data(V[l,r]),
+                    conj(factor(Xₖ[l,r])) * factor(V[l,r]),
                     T(1)
                   )
             end
@@ -158,15 +158,15 @@ function FramingStepLeft(t::Matrix{T}, v::Array{T,4},
                           x::TTvector{T,N,d}, k::Int, 
                           Wᴿ::OffsetVector{Matrix{T},Vector{Matrix{T}}}) where {T<:Number,N,d}
     Xₖ = x.cores[k]
-    HXₖ = sparse_H_mult(Xₖ,t,v)
+    HXₖ = sparse_H_matvec(Xₖ,t,v)
 
     Wᴿ⁻¹ = OffsetVector([Matrix{T}(undef,0,0) for l in 0:N], 0:N)
     for l in axes(Xₖ,1)
       Wᴿ⁻¹[l] = zeros(T, HXₖ[1][l], Xₖ.row_ranks[l])
       for r in axes(Xₖ,3) ∩ (l:l+1)
-        if isnonzero(Xₖ[l,r])
+        if isnonzero(Xₖ,l,r)
           for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
-            if isnonzero(V[l,r])
+            if isnonzero(V,l,r)
               mul!( view(Wᴿ⁻¹[l], I[l], :),
                     data(V[l,r]), 
                     Wᴿ[r][J[r],:] * adjoint(data(Xₖ[l,r])),
@@ -181,4 +181,3 @@ function FramingStepLeft(t::Matrix{T}, v::Array{T,4},
 
     return Wᴿ⁻¹
 end
-

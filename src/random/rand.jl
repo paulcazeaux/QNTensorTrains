@@ -80,3 +80,45 @@ function tt_rand(d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Typ
 
   return tt
 end
+
+"""
+    tt_out = perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int}}}, [ϵ::Float64 = 1e-4])
+
+Compute a d-dimensional TT-tensor perturbation of `tt` with ranks at least `r` and Gaussian distributed entries for the cores.
+"""
+function perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int}}}, ϵ::Float64 = 1e-4) where {T<:Number,N,d}
+  @boundscheck (length(r) == d+1) || (length(r) == d-1)
+  for k=1:d+1
+    @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
+  end
+
+  rp = deepcopy(rank(tt))
+
+  if length(r) == d+1
+    for k=1:d+1
+      @boundscheck axes(r[k],1) == axes(rank(tt,k),1)
+      for n in axes(r[k],1)
+        rp[k][n] = max(1, r[k][n] - rank(tt,k,n))
+      end
+    end
+  else # length(r) == d-1
+    for k=2:d
+      @boundscheck axes(r[k-1],1) == axes(rank(tt,k),1)
+      for n in axes(r[k-1],1)
+        rp[k][n] = max(1, r[k-1][n] - rank(tt,k,n))
+      end
+    end
+  end
+
+  return tt + ϵ * tt_rand(d,N,rp)
+end
+
+"""
+    tt_out = perturbation(tt::TTvector{T,N,d}, r::Int, [ϵ::Float64 = 1e-4])
+
+Compute a d-dimensional TT-tensor perturbation of `tt` with all block ranks at least `r` and Gaussian distributed entries for the cores.
+"""
+function perturbation(tt::TTvector{T,N,d}, r::Int, ϵ::Float64 = 1e-4) where {T<:Number,N,d}
+  r = [ [(2≤k≤d ? r : 1) for n in axes(rank(tt,k),1)] for k=1:d+1]
+  return perturbation(tt,r,ϵ)
+end

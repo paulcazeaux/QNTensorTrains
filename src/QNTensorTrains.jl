@@ -12,6 +12,7 @@ using LinearAlgebra
 include("base/util.jl")
 include("base/block.jl")
 include("base/sparsecore.jl")
+include("base/unsafesparsecore.jl")
 include("base/tensor.jl")
 include("base/round.jl")
 include("base/multiplication.jl")
@@ -38,11 +39,13 @@ export Adag!, A!, AdagA!, S!, Id!
 export AdagᵢAⱼ!, AdagᵢAdagⱼAₖAₗ!
 
 using .Hamiltonian
-export sparse_H_mult, H_mult, RayleighQuotient
+export sparse_H_matvec, H_matvec, RayleighQuotient
 
 include("random/rand.jl")
+export tt_rand, perturbation
+
 include("random/randomround.jl")
-export tt_rand, roundRandOrth, roundRandOrth!
+export roundRandOrth, roundRandOrth!
 
 include("solvers/ALS.jl")
 include("solvers/MALS.jl")

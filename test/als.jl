@@ -14,8 +14,8 @@ for i=1:d, j=1:d
     λ,x = ALS(t,v,x0,1e-6)
     μ,y = MALS(t,v,x0,1e-6)
 
-    RayleighQuotient(x,t,v) ≈ -1 && isapprox(norm(H_mult(x,t,v) - λ*x, :LR), 0; atol=1e-6) &&
-    RayleighQuotient(y,t,v) ≈ -1 && isapprox(norm(H_mult(y,t,v) - μ*y, :LR), 0; atol=1e-6)
+    RayleighQuotient(x,t,v) ≈ -1 && isapprox(norm(H_matvec(x,t,v) - λ*x, :LR), 0; atol=1e-6) &&
+    RayleighQuotient(y,t,v) ≈ -1 && isapprox(norm(H_matvec(y,t,v) - μ*y, :LR), 0; atol=1e-6)
   end
 end
 
@@ -40,7 +40,7 @@ for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d
     round_global!(z)
     z *= 1/norm(z)
     
-    isapprox(abs(dot(x,z)), 1.; atol=1e-6) && isapprox(norm(H_mult(x,t,v) - λ*x, :LR), 0; atol=1e-6) &&
-    isapprox(abs(dot(y,z)), 1.; atol=1e-6) && isapprox(norm(H_mult(y,t,v) - μ*y, :LR), 0; atol=1e-6)
+    isapprox(abs(dot(x,z)), 1.; atol=1e-6) && isapprox(norm(H_matvec(x,t,v) - λ*x, :LR), 0; atol=1e-6) &&
+    isapprox(abs(dot(y,z)), 1.; atol=1e-6) && isapprox(norm(H_matvec(y,t,v) - μ*y, :LR), 0; atol=1e-6)
   end
 end

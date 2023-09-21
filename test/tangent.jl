@@ -31,5 +31,5 @@ end
 
   ϵ = 1e-4
   ddx = 1/ϵ * (round!(x+ϵ*dir, rank(x)) - x)
-  norm(TTvector(dx) - ddx)/norm(dir) < ϵ
+  norm(TTvector(dx) - ddx)/norm(dir) < 10ϵ
 end

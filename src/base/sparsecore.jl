@@ -113,6 +113,26 @@ function Base.axes(A::SparseCore)
   return (A.row_qn, 1:2, A.col_qn)
 end
 
+function isnonzero(A::SparseCore, l::Int, s::Int, r::Int)
+  if s==1 && r == l # Unoccupied state
+    return isnonzero(A.unoccupied[l])
+  elseif s==2 && l+1 == r # Occupied state
+    return isnonzero(A.occupied[l])
+  else # Forbidden
+    return false
+  end
+end
+
+function isnonzero(A::SparseCore, l::Int, r::Int)
+  if r == l # Unoccupied state
+    return isnonzero(A.unoccupied[l])
+  elseif l+1 == r # Occupied state
+    return isnonzero(A.occupied[l])
+  else # Forbidden
+    return false
+  end
+end
+
 function Base.getindex(A::SparseCore{T}, l::Int, s::Int, r::Int) where T<:Number
   @boundscheck checkbounds(A, l,s,r)
 
@@ -874,14 +894,23 @@ function reduce_ranks!(A::SparseCore{T,N,d},
   @assert axes(row_ranks) == axes(A.row_ranks)
   @assert axes(col_ranks) == axes(A.col_ranks)
 
-  for n in axes(A.unoccupied,1)
-    A.unoccupied[n] = A.unoccupied[n][1:row_ranks[n],1:col_ranks[n]]
-  end
-  for n in axes(A.occupied,1)
-    A.occupied[n] = A.occupied[n][1:row_ranks[n],1:col_ranks[n+1]]
-  end
   A.row_ranks .= row_ranks
   A.col_ranks .= col_ranks
+  
+  for n in axes(A.unoccupied,1)
+    if isnonzero(A.unoccupied[n])
+      A.unoccupied[n] = A.unoccupied[n][1:row_ranks[n],1:col_ranks[n]]
+    else
+      A.unoccupied[n] = zeros_block(T,row_ranks[n],col_ranks[n])
+    end
+  end
+  for n in axes(A.occupied,1)
+    if isnonzero(A.occupied[n])
+      A.occupied[n] = A.occupied[n][1:row_ranks[n],1:col_ranks[n+1]]
+    else
+      A.occupied[n] = zeros_block(T,row_ranks[n],col_ranks[n+1])
+    end
+  end
 
   return A
 end

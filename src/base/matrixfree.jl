@@ -16,35 +16,17 @@ assuming the quantum number flux in the chain up to core 'k' is `flux`,
 and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k` (included).
 """
 function Adag_view(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d}
-  k = A.k
-  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
-
-  B = SparseCore{T,N,d}(k)
-
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr-1` electrons to the right of core `k` (excluded) by 
+  # Ensure that there is room for `nl` electrons to the left of core `A`
+  # as well as `nr-1` electrons to the right of core `A` (excluded) by 
   # allowing only certain rows and columns
+  ql = shift_qn(A.row_qn, flux  , nl  , nr  , N)
+  qr = shift_qn(A.col_qn, flux+1, nl+1, nr-1, N)
 
-  ql = shift_ranks!(B.row_ranks, A.row_ranks, flux, nl, nr, N)
-  qr = shift_ranks!(B.col_ranks, A.col_ranks, flux+1, nl+1, nr-1, N)
+  B = UnsafeSparseCore{T,N,d}(1:0, axes(A.occupied,1)∩ql∩(qr.-1))
 
-  for l in axes(A,1) ∩ (axes(A,3).-1)
-    if l∈ql && l+1∈qr
-      B[l,2,l+1] = A[l-flux,1,l-flux]
-    else
-      B[l,2,l+1] = zeros_block(T,B.row_ranks[l],B.col_ranks[l+1])
-    end
+  for l in axes(B.occupied,1)
+    B[l,2,l+1] = A[l-flux,1,l-flux]
   end
-
-  # Reshape unoccupied blocks
-  for l in axes(A,1) ∩ axes(A,3)
-    B[l,1,l] = zeros_block(T, B.row_ranks[l], B.col_ranks[l])
-  end
-
-  @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-  @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-  @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-  @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
 
   return B, flux+1, nl+1, nr-1
 end
@@ -60,32 +42,17 @@ function A_view(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Num
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
 
-  B = SparseCore{T,N,d}(k)
-
   # Ensure that there is room for `nl` electrons to the left of core `k`
   # as well as `nr` electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
+  ql = shift_qn(A.row_qn, flux  , nl, nr, N)
+  qr = shift_qn(A.col_qn, flux-1, nl, nr, N)
 
-  ql = shift_ranks!(B.row_ranks, A.row_ranks, flux,   nl, nr, N)
-  qr = shift_ranks!(B.col_ranks, A.col_ranks, flux-1, nl, nr, N)
+  B = UnsafeSparseCore{T,N,d}(axes(A.unoccupied,1)∩ql∩qr, 1:0)
 
-  for l in axes(B,1) ∩ axes(B,3)
-    if l ∈ ql ∩ qr
-      B[l,1,l] = A[l-flux,2,l-flux+1]
-    else
-      B[l,1,l] = zeros_block(T, B.row_ranks[l], B.col_ranks[l])
-    end
+  for l in axes(B.unoccupied,1)
+    B[l,1,l] = A[l-flux,2,l-flux+1]
   end
-
-  # Reshape occupied blocks
-  for l in axes(A,1) ∩ (axes(A,3).-1)
-    B[l,2,l+1] = zeros_block(T, B.row_ranks[l], B.col_ranks[l+1])
-  end
-
-  @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-  @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-  @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-  @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
 
   return B, flux-1, nl, nr
 end
@@ -101,31 +68,16 @@ function AdagA_view(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
 
-  B = SparseCore{T,N,d}(k)
-
   # Ensure that there is room for `nl` electrons to the left of core `k`
   # as well as `nr-1` electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
-  ql = shift_ranks!(B.row_ranks, A.row_ranks, flux, nl, nr, N)
-  qr = shift_ranks!(B.col_ranks, A.col_ranks, flux, nl+1, nr-1, N)
+  ql = shift_qn(A.row_qn, flux, nl  , nr  , N)
+  qr = shift_qn(A.col_qn, flux, nl+1, nr-1, N)
 
-  for l in axes(B,1) ∩ (axes(B,3).-1)
-    if l∈ql && l+1∈qr
-      B[l,2,l+1] = A[l-flux,2,l-flux+1]
-    else
-      B[l,2,l+1] = zeros_block(T, B.row_ranks[l], B.col_ranks[l+1])
-    end
-  end
+  B = UnsafeSparseCore{T,N,d}(1:0, axes(A.occupied,1)∩ql∩(qr.-1))
 
-  # Reshape unoccupied blocks
-  for l in axes(B,1) ∩ axes(B,3)
-    B[l,1,l] = zeros_block(T, B.row_ranks[l], B.col_ranks[l])
-  end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
+  for l in axes(B.occupied,1)
+    B[l,2,l+1] = A[l-flux,2,l-flux+1]
   end
 
   return B, flux, nl+1, nr-1
@@ -143,35 +95,22 @@ function S_view(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Num
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
   @boundscheck @assert isodd(flux)
 
-  B = SparseCore{T,N,d}(k)
-
   # Ensure that there is room for `nl` electrons to the left of core `k`
   # as well as `nr` electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
-  ql = shift_ranks!(B.row_ranks, A.row_ranks, flux, nl, nr, N)
-  qr = shift_ranks!(B.col_ranks, A.col_ranks, flux, nl, nr, N)
+  ql = shift_qn(A.row_qn, flux, nl, nr, N)
+  qr = shift_qn(A.col_qn, flux, nl, nr, N)
 
-  for l in axes(B,1) ∩ axes(B,3)
-    if l ∈ ql ∩ qr
-      B[l,1,l] = A[l-flux,1,l-flux]
-    else
-      B[l,1,l] = zeros_block(T,B.row_ranks[l],B.col_ranks[l])
-    end
+  B = UnsafeSparseCore{T,N,d}(axes(A.unoccupied,1)∩ql∩qr, axes(A.occupied,1)∩ql∩(qr.-1))
+
+  for l in axes(B.unoccupied,1)
+    B[l,1,l] = A[l-flux,1,l-flux]
   end
-  for l ∈ axes(B,1) ∩ (axes(B,3).-1)
-    if l ∈ ql && l+1 ∈ qr
-      B[l,2,l+1] = copy(A[l-flux,2,l-flux+1])
-      lmul!(-1, B[l,2,l+1])
-    else
-      B[l,2,l+1] = zeros_block(T,B.row_ranks[l],B.col_ranks[l+1])
-    end
+  for l in axes(B.occupied,1)
+    B[l,2,l+1] = copy(A[l-flux,2,l-flux+1])
+    lmul!(-1, B[l,2,l+1])
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
   return B, flux, nl, nr
 end
 
@@ -187,33 +126,19 @@ function Id_view(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Nu
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
   @assert iseven(flux)
 
-  B = SparseCore{T,N,d}(k)
-
   # Ensure that there is room for `nl` electrons to the left of core `k`
   # as well as `nr` electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
-  ql = shift_ranks!(B.row_ranks, A.row_ranks, flux, nl, nr, N)
-  qr = shift_ranks!(B.col_ranks, A.col_ranks, flux, nl, nr, N)
+  ql = shift_qn(A.row_qn, flux, nl, nr, N)
+  qr = shift_qn(A.col_qn, flux, nl, nr, N)
 
-  for l in axes(B,1) ∩ axes(B,3)
-    if l ∈ ql ∩ qr
-      B[l,1,l] = A[l-flux,1,l-flux]
-    else
-      B[l,1,l] = zeros_block(T,B.row_ranks[l],B.col_ranks[l])
-    end
+  B = UnsafeSparseCore{T,N,d}(axes(A.unoccupied,1)∩ql∩qr, axes(A.occupied,1)∩ql∩(qr.-1))
+
+  for l in axes(B.unoccupied,1)
+    B[l,1,l] = A[l-flux,1,l-flux]
   end
-  for l ∈ axes(B,1) ∩ (axes(B,3).-1)
-    if l ∈ ql && l+1 ∈ qr
-      B[l,2,l+1] = A[l-flux,2,l-flux+1]
-    else
-      B[l,2,l+1] = zeros_block(T,B.row_ranks[l],B.col_ranks[l+1])
-    end
-  end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
+  for l ∈ axes(B.occupied,1)
+    B[l,2,l+1] = A[l-flux,2,l-flux+1]
   end
 
   return B, flux, nl, nr
@@ -234,18 +159,20 @@ function AdagᵢAⱼ_view(tt_in::TTvector{T,N,d}, i::Int, j::Int) where {T<:Numb
 
   for n=1:d
     if n == i && n == j
-      cores[n], flux, nl, nr = AdagA_view(core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = AdagA_view(core(tt_in,n), flux, nl, nr)
     elseif n == i # Creation operator
-      cores[n], flux, nl, nr = Adag_view( core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = Adag_view( core(tt_in,n), flux, nl, nr)
     elseif n == j # Annihilation operator
-      cores[n], flux, nl, nr = A_view(    core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = A_view(    core(tt_in,n), flux, nl, nr)
     elseif isodd(flux)
-      cores[n], flux, nl, nr = S_view(    core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = S_view(    core(tt_in,n), flux, nl, nr)
     else # if iseven(flux)
-      cores[n], flux, nl, nr = Id_view(   core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = Id_view(   core(tt_in,n), flux, nl, nr)
     end
     # Adjust row ranks using flux to determine shift
     shift_ranks!(ranks[n+1], rank(tt_in, n+1), flux, nl, nr, N)
+    # Reconstruct a SparseCore from the unsafe view obtained above
+    cores[n] = SparseCore(n,ranks[n],ranks[n+1],unsafe_core)
   end
 
   tt_out = TTvector(ranks, cores)
@@ -267,23 +194,25 @@ function AdagᵢAdagⱼAₖAₗ_view(tt_in::TTvector{T,N,d}, i::Int, j::Int, k::
   cores = [SparseCore{T,N,d}(n) for n=1:d]
   ranks = [(n ≤ d ? cores[n].row_ranks : cores[d].col_ranks) for n=1:d+1]
 
-  for n=1:d
-    shift_ranks!(ranks[n], rank(tt_in, n), flux, nl, nr, N)
+  shift_ranks!(ranks[1], rank(tt_in, 1), flux, nl, nr, N)
 
+  for n=1:d
     if n ∈ (i,j)∩(k,l)
-      cores[n], flux, nl, nr = AdagA_view(core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = AdagA_view(core(tt_in,n), flux, nl, nr)
     elseif n ∈ (i,j) # Creation operator
-      cores[n], flux, nl, nr = Adag_view( core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = Adag_view( core(tt_in,n), flux, nl, nr)
     elseif n ∈ (k,l) # Annihilation operator
-      cores[n], flux, nl, nr = A_view(    core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = A_view(    core(tt_in,n), flux, nl, nr)
     elseif isodd(flux)
-      cores[n], flux, nl, nr = S_view(    core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = S_view(    core(tt_in,n), flux, nl, nr)
     else # if iseven(flux)
-      cores[n], flux, nl, nr = Id_view(   core(tt_in,n), flux, nl, nr)
+      unsafe_core, flux, nl, nr = Id_view(   core(tt_in,n), flux, nl, nr)
     end
+
+    shift_ranks!(ranks[n+1], rank(tt_in, n+1), flux, nl, nr, N)
+    cores[n] = SparseCore(n,ranks[n],ranks[n+1],unsafe_core)
   end
 
-  shift_ranks!(ranks[d+1], rank(tt_in, d+1), flux, nl, nr, N)
 
   tt_out = TTvector(ranks, cores)
   # Sanity check for the ranks
@@ -328,12 +257,7 @@ function Adag(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Numbe
   for l in axes(A,1) ∩ axes(A,3)
     B[l,1,l] = zeros_block(T, B.row_ranks[l], B.col_ranks[l])
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
 
   return B, flux+1, nl+1, nr-1
 end
@@ -370,12 +294,7 @@ function A(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Number,N
   for l in axes(A,1) ∩ (axes(A,3).-1)
     B[l,2,l+1] = zeros_block(T, B.row_ranks[l], B.col_ranks[l+1])
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
   return B, flux-1, nl, nr
 end
 
@@ -410,12 +329,7 @@ function AdagA(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Numb
   for l in axes(B,1) ∩ axes(B,3)
     B[l,1,l] = zeros_block(T, B.row_ranks[l], B.col_ranks[l])
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
 
   return B, flux, nl+1, nr-1
 end
@@ -454,12 +368,7 @@ function S(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Number,N
       B[l,2,l+1] = zeros_block(T,B.row_ranks[l],B.col_ranks[l+1])
     end
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
   return B, flux, nl, nr
 end
 
@@ -497,12 +406,7 @@ function Id(A::SparseCore{T,N,d}, flux::Int, nl::Int, nr::Int) where {T<:Number,
       B[l,2,l+1] = zeros_block(T,B.row_ranks[l],B.col_ranks[l+1])
     end
   end
-  @boundscheck begin
-    @assert all(B.row_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 1))
-    @assert all(B.row_ranks[axes(B.occupied,  1)   ] .== size.(B.occupied,   1))
-    @assert all(B.col_ranks[axes(B.unoccupied,1)   ] .== size.(B.unoccupied, 2))
-    @assert all(B.col_ranks[axes(B.occupied,  1).+1] .== size.(B.occupied,   2))
-  end
+
   return B, flux, nl, nr
 end
 

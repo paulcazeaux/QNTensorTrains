@@ -37,7 +37,7 @@ mutable struct TTtangent{T<:Number,N,d}
 
       P[k+1] = [zeros(T,Xₖ.col_ranks[r],Dₖ.col_ranks[r]) for r in axes(Xₖ,3)]
       for r in axes(Xₖ,3), l in (r-1:r)∩axes(Xₖ,1)
-        if isnonzero(Xₖ[l,r]) && isnonzero(Dₖ[l,r])
+        if isnonzero(Xₖ,l,r) && isnonzero(Dₖ,l,r)
           mul!( P[k+1][r], 
                 adjoint(data(Xₖ[l,r])) * P[k][l],
                 data(Dₖ[l,r]),
@@ -69,7 +69,7 @@ mutable struct TTtangent{T<:Number,N,d}
 
       Qₖ = [zeros(T,Dₖ.row_ranks[l],Xₖ.row_ranks[l]) for l in axes(Xₖ,1)]
       for l in axes(Xₖ,1), r in (l:l+1)∩axes(Xₖ,3)
-        if isnonzero(Xₖ[l,r]) && isnonzero(tmp[l,r])
+        if isnonzero(Xₖ,l,r) && isnonzero(tmp,l,r)
           mul!( Qₖ[l], 
                 data(tmp[l,r]),
                 adjoint(data(Xₖ[l,r])),
@@ -204,10 +204,10 @@ function TTvector(dx::TTtangent{T,N,d}) where {T<:Number,N,d}
   end
 
   for l in axes(cores[1],1), r in (l:l+1)∩axes(cores[1],3)
-    if isnonzero(component(dx,1)[l,r]) || isnonzero(core(dx.baseL,1)[l,r])
+    if isnonzero(component(dx,1),l,r) || isnonzero(core(dx.baseL,1),l,r)
       X = zeros(T,rank(dx,1,l),2*rank(dx,2,r))
-      isnonzero(component(dx, 1)[l,r])  && (X[:, 1:rank(dx,2,r)    ] .= factor(component(dx, 1)[l,r]) .* data(component(dx, 1)[l,r]) )
-      isnonzero(core(dx.baseL,1)[l,r])  && (X[:, rank(dx,2,r)+1:end] .= factor(core(dx.baseL,1)[l,r]) .* data(core(dx.baseL,1)[l,r]) )
+      X[:, 1:rank(dx,2,r)    ] = component(dx, 1)[l,r]
+      X[:, rank(dx,2,r)+1:end] = core(dx.baseL,1)[l,r]
     else
       X = zeros_block(T,rank(dx,1,l),2*rank(dx,2,r))
     end
@@ -216,11 +216,11 @@ function TTvector(dx::TTtangent{T,N,d}) where {T<:Number,N,d}
 
   for k=2:d-1
     for l in axes(cores[k],1), r in (l:l+1)∩axes(cores[k],3)
-      if isnonzero(core(dx.baseR, k)[l,r]) || isnonzero(component(dx,k)[l,r]) || isnonzero(core(dx.baseL,k)[l,r])
+      if isnonzero(core(dx.baseR, k),l,r) || isnonzero(component(dx,k),l,r) || isnonzero(core(dx.baseL,k),l,r)
         X = zeros(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-        isnonzero(core(dx.baseR, k)[l,r]) && (X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ] .= factor(core(dx.baseR,k)[l,r]) .* data(core(dx.baseR,k)[l,r]) )
-        isnonzero(component(dx,k)[l,r])   && (X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ] .= factor(component(dx, k)[l,r]) .* data(component(dx, k)[l,r]) ) 
-        isnonzero(core(dx.baseL,k)[l,r])  && (X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end] .= factor(core(dx.baseL,k)[l,r]) .* data(core(dx.baseL,k)[l,r]) )
+        X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ] = core(dx.baseR,k)[l,r]
+        X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ] = component(dx, k)[l,r]
+        X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end] = core(dx.baseL,k)[l,r]
       else
         X = zeros_block(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
       end
@@ -229,10 +229,10 @@ function TTvector(dx::TTtangent{T,N,d}) where {T<:Number,N,d}
   end
 
   for l in axes(cores[d],1), r in (l:l+1)∩axes(cores[d],3)
-    if isnonzero(core(dx.baseR,d)[l,r]) && isnonzero(component(dx,d)[l,r])
+    if isnonzero(core(dx.baseR,d),l,r) || isnonzero(component(dx,d),l,r)
       X = zeros(T,2*rank(dx,d,l),rank(dx,d+1,r))
-      isnonzero(core(dx.baseR,d)[l,r]) && (X[1:rank(dx,d)[l],    :] .= factor(core(dx.baseR,d)[l,r]) .* data(core(dx.baseR,d)[l,r]) )
-      isnonzero(component(dx,d)[l,r])  && (X[rank(dx,d)[l]+1:end,:] .= factor(component(dx, d)[l,r]) .* data(component(dx, d)[l,r]) )
+      X[1:rank(dx,d)[l],    :] = core(dx.baseR,d)[l,r]
+      X[rank(dx,d)[l]+1:end,:] = component(dx, d)[l,r]
     else
       X = zeros_block(T,2*rank(dx,d,l),rank(dx,d+1,r))
     end
@@ -264,10 +264,10 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
   end
 
   for l in axes(cores[1],1), r in (l:l+1)∩axes(cores[1],3)
-    if isnonzero(component(dx,1)[l,r]) || isnonzero(core(dx.baseL,1)[l,r])
+    if isnonzero(component(dx,1),l,r) || isnonzero(core(dx.baseL,1),l,r)
       X = zeros(T,rank(dx,1,l),2*rank(dx,2,r))
-      isnonzero(component(dx, 1)[l,r])  && (X[:, 1:rank(dx,2,r)    ] .= α.*factor(component(dx, 1)[l,r]) .* data(component(dx, 1)[l,r]) )
-      isnonzero(core(dx.baseL,1)[l,r])  && (X[:, rank(dx,2,r)+1:end] .=    factor(core(dx.baseL,1)[l,r]) .* data(core(dx.baseL,1)[l,r]) )
+      axpy!(α, component(dx, 1)[l,r], X[:, 1:rank(dx,2,r)    ])
+      axpy!(1, core(dx.baseL,1)[l,r], X[:, rank(dx,2,r)+1:end])
     else
       X = zeros_block(T,rank(dx,1,l),2*rank(dx,2,r))
     end
@@ -276,11 +276,11 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
 
   for k=2:d-1
     for l in axes(cores[k],1), r in (l:l+1)∩axes(cores[k],3)
-      if isnonzero(core(dx.baseR, k)[l,r]) || isnonzero(component(dx,k)[l,r]) || isnonzero(core(dx.baseL,k)[l,r])
+      if isnonzero(core(dx.baseR, k),l,r) || isnonzero(component(dx,k),l,r) || isnonzero(core(dx.baseL,k),l,r)
         X = zeros(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-        isnonzero(core(dx.baseR, k)[l,r]) && (X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ] .=    factor(core(dx.baseR,k)[l,r]) .* data(core(dx.baseR,k)[l,r]) )
-        isnonzero(component(dx,k)[l,r])   && (X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ] .= α.*factor(component(dx, k)[l,r]) .* data(component(dx, k)[l,r]) ) 
-        isnonzero(core(dx.baseL,k)[l,r])  && (X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end] .=    factor(core(dx.baseL,k)[l,r]) .* data(core(dx.baseL,k)[l,r]) )
+        axpy!(1, core(dx.baseR,k)[l,r], X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ])
+        axpy!(α, component(dx, k)[l,r], X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ])
+        axpy!(1, core(dx.baseL,k)[l,r], X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end])
       else
         X = zeros_block(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
       end
@@ -289,11 +289,11 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
   end
 
   for l in axes(cores[d],1), r in (l:l+1)∩axes(cores[d],3)
-    if isnonzero(core(dx.baseR,d)[l,r]) && isnonzero(component(dx,d)[l,r])
+    if isnonzero(core(dx.baseR,d),l,r) && isnonzero(component(dx,d),l,r)
       X = zeros(T,2*rank(dx,d,l),rank(dx,d+1,r))
-      isnonzero(core(dx.baseR,d)[l,r]) && (X[1:rank(dx,d)[l],    :] .=    factor(core(dx.baseR,d)[l,r]) .* data(core(dx.baseR,d)[l,r]) )
-      isnonzero(component(dx,d)[l,r])  && (X[rank(dx,d)[l]+1:end,:] .=    factor(core(dx.baseR,d)[l,r]) .* data(core(dx.baseR,d)[l,r])
-                                                                    .+ α.*factor(component(dx, d)[l,r]) .* data(component(dx, d)[l,r]) )
+      axpy!(1, core(dx.baseR,d)[l,r], X[1:rank(dx,d)[l],    :])
+      axpy!(1, core(dx.baseR,d)[l,r], X[rank(dx,d)[l]+1:end,:])
+      axpy!(α, component(dx, d)[l,r], X[rank(dx,d)[l]+1:end,:])
     else
       X = zeros_block(T,2*rank(dx,d,l),rank(dx,d+1,r))
     end
