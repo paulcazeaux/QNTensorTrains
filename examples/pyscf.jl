@@ -33,9 +33,7 @@ println("FCI Energy (Ha): ", cisolver.e_tot)
 
 #
 # Setup for MPS Calculation
-#
-t = one_body
-V = -.5 * permutedims(two_body, (3, 2, 1, 4))
+
 
 ↑(i) = 2i-1
 ↓(i) = 2i
@@ -47,15 +45,18 @@ for i=1:n, j=1:n
 	t[↑(i),↑(j)] = one_body[i,j]
 	t[↓(i),↓(j)] = one_body[i,j]
 end
+# Mindful of chemists' notation index ordering
 for i=1:n,j=1:n,k=1:n,l=1:n
-    v[↑(j),↑(i),↑(k),↑(l)] = .5*two_body[j,k,i,l]
-    v[↓(j),↓(i),↓(k),↓(l)] = .5*two_body[j,k,i,l]
-    v[↓(j),↑(i),↓(k),↑(l)] = .5*two_body[j,k,i,l]
-    v[↑(j),↓(i),↑(k),↓(l)] = .5*two_body[j,k,i,l]
+    v[↑(i),↑(j),↑(k),↑(l)] = 1/2 * two_body[i,k,j,l]
+    v[↓(i),↓(j),↓(k),↓(l)] = 1/2 * two_body[i,k,j,l]
+    v[↓(i),↑(j),↓(k),↑(l)] = 1/2 * two_body[i,k,j,l]
+    v[↑(i),↓(j),↑(k),↓(l)] = 1/2 * two_body[i,k,j,l]
 end
 v[abs.(v).<1e-8] .= 0
+# Reduce two-electron term - condense to i<j and k<l terms
+v = QNTensorTrains.Hamiltonian.reduce(v)
 
-E(ψ) = RayleighQuotient(ψ,t,v) + e_nuclear
+E(ψ) = RayleighQuotient(ψ,t,v; reduced=true) + e_nuclear
 
 s = Vector{Bool}(undef, d)
 for i=1:n
@@ -65,13 +66,12 @@ end
 e_nuclear = mf.energy_nuc()
 ψmf = tt_state(s)
 emf = E(ψmf)
-@show E(ψmf)
 println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
+println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - cisolver.e_tot)
 
-@show mf.e_tot - e_nuclear, cisolver.e_tot - e_nuclear
 ψ0 = perturbation(ψmf, 10, 1e12)
 
-@time e, ψ = MALS(t,v,ψ0)
+@time e, ψ = MALS(t,v,ψ0; reduced=true)
 display(ψ)
 @show E(ψ)
 println("DMRG Error ", abs(e+e_nuclear - cisolver.e_tot))

@@ -34,6 +34,20 @@ function shift_ranks(ranks::AbstractVector{Int},
   return new_ranks
 end
 
+"""
+  `sparse_H_matvec(core::SparseCore{T,N,d}, t::Matrix{T}, v::Array{T,4})`
+
+Core function for the matrix-free application of two-body Hamiltonian operators,
+implementing the action on a given TT `core`.
+The Hamiltonian is given in terms of one-electron integrals `t_{ij}` and two-electron integrals `v_{ijkl}`.
+
+In particular, the two-electron integrals are assumed to be given in physicists' notation and *reduced format* that is,
+`v_{ijkl} = 1/2 ( <ij|kl>  + <ji|kl> - <ij|lk> - <ji|kl> )` for `i < j` and `k < l`,
+where `<ij|kl> = ∫∫ ψ†_i(x₁) ψ†_j(x₂) 1/|x₁-x₂| ψ_k(x₁) ψ_l(x₂) dx₁dx₂`.
+
+Returns a tuple containing a sparse representation of the resulting core:
+block ranks, block row and column index ranges and views into block data.
+"""
 function sparse_H_matvec(core::SparseCore{T,N,d}, t::Matrix{T}, v::Array{T,4}) where {T<:Number,N,d}
   n = core.k
   # @boundscheck @assert 1 ≤ n ≤ d
