@@ -23,7 +23,7 @@ include("base/complex.jl")
 
 export TTvector, SparseCore, core, ⊕
 export tt_zeros, tt_ones, tt_state
-export times, round!, round_global!
+export move_core!, round!, round_global!
 export times, power, lognorm
 include("base/tangent.jl")
 export TTtangent, component, retract, transport
@@ -43,7 +43,7 @@ using .Hamiltonian
 export sparse_H_matvec, H_matvec, RayleighQuotient
 
 include("random/rand.jl")
-export tt_rand, perturbation
+export tt_rand,tt_randn, perturbation
 
 include("random/randomround.jl")
 export roundRandOrth, roundRandOrth!

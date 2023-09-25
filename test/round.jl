@@ -6,7 +6,7 @@
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   QNTensorTrains.leftOrthogonalize!(x)
 
@@ -21,7 +21,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   QNTensorTrains.leftOrthogonalize!(x, keepRank=true)
 
@@ -36,7 +36,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   QNTensorTrains.rightOrthogonalize!(x)
 
@@ -51,7 +51,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   QNTensorTrains.rightOrthogonalize!(x, keepRank=true)
 
@@ -67,7 +67,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   y = round(x, tol)
   Y = Array(y)
@@ -85,7 +85,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   X = Array(x)
   y = round(x, tol; Global=true)
   Y = Array(y)

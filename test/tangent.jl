@@ -8,7 +8,7 @@
   x = tt_state([k∈s for k=1:d])
 
   r = [ [ (k in (1,d+1) ? 1 : rand(2:4)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  dir = tt_rand(d,N,r)
+  dir = tt_randn(d,N,r)
   dx = TTtangent(x, dir)
 
   ϵ = 1e-4
@@ -17,16 +17,16 @@
 end
 
 
-# Tangent to tt_rand
+# Tangent to tt_randn
 @test begin
   T = Float64
   d = 10
   N = 6
 
   r = [ [ (k in (1,d+1) ? 1 : rand(0:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = tt_rand(d,N,r)
+  x = tt_randn(d,N,r)
   r = [ [ (k in (1,d+1) ? 1 : rand(2:4)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  dir = tt_rand(d,N,r)
+  dir = tt_randn(d,N,r)
   dx = TTtangent(x, dir)
 
   ϵ = 1e-4

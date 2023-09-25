@@ -67,7 +67,9 @@ function twobody_test(i,j,k,l)
 
   ref_s = (i, j, s[3:N]...)
 
-  x0 = tt_state(s, d) + AdagᵢAⱼ(tt_rand(d,N,r), i, rand(1:d)) # Random perturbation that should go to zero
+  p = round(tt_randn(d,N,r)); rmul!(p, 1/norm(p))
+  Skl = delete!(delete!(Set(1:d),k),l)
+  x0 = tt_state(s, d) + AdagᵢAⱼ(p, rand(Skl), k) + AdagᵢAⱼ(p, rand(Skl), l) # Random perturbation that should go to zero
   x = deepcopy(x0); AdagᵢAdagⱼAₖAₗ!(x, i,j,k,l)
   y = AdagᵢAdagⱼAₖAₗ(x0, i,j,k,l)
 
@@ -79,9 +81,9 @@ function twobody_test(i,j,k,l)
   ny = [dot(y, AdagᵢAⱼ(y, k, k)) / dot(y,y) for k=1:d]
   nref = [(k ∈ ref_s ? 1.0 : 0.0) for k=1:d]
  
-  test = isapprox(norm(x-y, :LR), 0; atol=1e-12*norm(x0)) && 
-         isapprox(norm(nx-nref), 0;  atol=1e-6 *norm(x0)) && 
-         isapprox(norm(ny-nref), 0;  atol=1e-6 *norm(x0))
+  test = isapprox(norm(x-y, :LR), 0; atol=10eps()*norm(x0)) && 
+         isapprox(norm(nx-nref),  0;  atol=10eps()*norm(x0)) && 
+         isapprox(norm(ny-nref),  0;  atol=10eps()*norm(x0))
 
   if !(test)
     @show i,j,k,l
