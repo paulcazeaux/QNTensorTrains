@@ -14,7 +14,7 @@ include("base/util.jl")
 include("base/block.jl")
 include("base/sparsecore.jl")
 include("base/unsafesparsecore.jl")
-include("base/tensor.jl")
+include("base/vector.jl")
 include("base/round.jl")
 include("base/multiplication.jl")
 include("base/addition.jl")
@@ -43,10 +43,13 @@ using .Hamiltonian
 export sparse_H_matvec, H_matvec, RayleighQuotient
 
 include("random/rand.jl")
+include("random/round.jl")
+include("random/sum.jl")
+include("random/matvec.jl")
 export tt_rand,tt_randn, perturbation
-
-include("random/randomround.jl")
 export roundRandOrth, roundRandOrth!
+export roundRandSum, roundRandSum!
+export randRound_H_MatVec, randRound_H_MatVec!
 
 include("solvers/ALS.jl")
 include("solvers/MALS.jl")

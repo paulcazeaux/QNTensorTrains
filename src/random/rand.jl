@@ -199,8 +199,8 @@ function perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int
       end
     end
   end
-  p = tt_rand(d,N,rp)
-  lmul!(p, ϵ*norm(tt)/norm(p))
+  p = tt_randn(d,N,rp)
+  lmul!(ϵ*norm(tt)/norm(p), p)
   return tt + p
 end
 

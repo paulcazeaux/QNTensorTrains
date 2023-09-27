@@ -28,7 +28,7 @@ end
   x = round(x0 + p)
 
   target_r = [ [ (k==1 || k==d+1 ? 1 : 5) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  y = roundRandOrth(x, target_r)
+  y = roundRandOrth(x, rank(x0), 5)
   y0 = round(y, rank(x0))
 
   isapprox( norm(y-x0, :LR), 0, atol = tol * norm(x0) ) && isapprox( norm(y0-x0, :LR), 0, atol = tol * norm(x0) )

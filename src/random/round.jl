@@ -1,16 +1,18 @@
 """
-    roundRandOrth!(tt::TTvector{T,N,d}, target_r::Array{Int,1})
+    roundRandOrth!(tt::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,Vector{Int}}}, over::Int)
 
 Truncates the ranks of `tt` with specified ranks `target_r`.
+Value of `over` represents oversampling
 """
-function roundRandOrth!(tt::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,Vector{Int}}}) where {T<:Number,N,d}
+function roundRandOrth!(tt::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,Vector{Int}}}, over::Int) where {T<:Number,N,d}
 
   @assert target_r[1][0] == rank(tt,1,0)
   @assert target_r[d+1][N] == rank(tt,d+1,N)
   r = rank(tt)
 
   # Use Rademacher cores
-  Ω = tt_rand((-1,1), d,N,target_r)
+  rΩ = [target_r[k] .+ (1<k≤d ? over : 0) for k=1:d+1]
+  Ω = tt_rand((-1,1), d,N,rΩ)
 
   # Precompute partial projections W
   W = [[zeros(T,0,0) for n in axes(core(tt,k),3)] for k=1:d]
@@ -50,6 +52,6 @@ function roundRandOrth!(tt::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,V
   return tt
 end
 
-function roundRandOrth(tt::TTvector, target_r::Vector{OffsetVector{Int,Vector{Int}}})
-  return roundRandOrth!(deepcopy(tt), target_r)
+function roundRandOrth(tt::TTvector, target_r::Vector{OffsetVector{Int,Vector{Int}}}, over::Int)
+  return roundRandOrth!(deepcopy(tt), target_r, over::Int)
 end

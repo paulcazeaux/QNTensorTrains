@@ -139,11 +139,11 @@ function round_global!(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Union{Int,A
     for n in axes(ranks[k],1)
       ranks[k][n] = min(ranks[k][n], rmax[k])
     end
-    tt.r[k+1] = ranks[k]
+    rank(tt,k+1) .= ranks[k]
   end
 
   for k=1:d
-    reduce_ranks!(core(tt,k), tt.r[k], tt.r[k+1])
+    reduce_ranks!(core(tt,k), rank(tt,k), rank(tt,k+1))
   end
 
   tt.orthogonal = false
@@ -160,7 +160,7 @@ Implements TT-rounding algorithm with global chopping strategy.
 """
 function round_global(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Union{Int,Array{Int,1}} = 0) where {T<:Number,N,d}
   tt1 = deepcopy(tt)
-  round2!(tt1, ϵ, rmax=rmax)
+  round_global!(tt1, ϵ, rmax=rmax)
   return tt1
 end
 

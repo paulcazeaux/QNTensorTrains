@@ -1140,7 +1140,7 @@ function H_matvec(tt_in::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}; reduced::
     C.row_ranks .= sC[1]
     C.col_ranks .= sC[2]
 
-    for l in axes(C,1), r in (l,l+1) ∩ axes(C,3)
+    for l in axes(C,1), r in (l:l+1) ∩ axes(C,3)
       X = zeros(T, C.row_ranks[l], C.col_ranks[r])
       for (I,J,v) in zip(sC[3:5]...)
         if isnonzero(v,l,r)

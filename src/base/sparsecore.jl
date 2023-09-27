@@ -903,14 +903,14 @@ function reduce_ranks!(A::SparseCore{T,N,d},
   
   for n in axes(A.unoccupied,1)
     if isnonzero(A.unoccupied[n])
-      A.unoccupied[n] = A.unoccupied[n][1:row_ranks[n],1:col_ranks[n]]
+      A.unoccupied[n] = Block(factor(A.unoccupied[n]), data(A.unoccupied[n])[1:row_ranks[n],1:col_ranks[n]])
     else
       A.unoccupied[n] = zeros_block(T,row_ranks[n],col_ranks[n])
     end
   end
   for n in axes(A.occupied,1)
     if isnonzero(A.occupied[n])
-      A.occupied[n] = A.occupied[n][1:row_ranks[n],1:col_ranks[n+1]]
+      A.occupied[n] = Block(factor(A.occupied[n]), data(A.occupied[n])[1:row_ranks[n],1:col_ranks[n+1]])
     else
       A.occupied[n] = zeros_block(T,row_ranks[n],col_ranks[n+1])
     end
