@@ -22,7 +22,7 @@ function Base.:+(b::TTvector{T,N,d}, c::Number) where {T<:Number,N,d}
   r[d+1][N] = rank(b,d+1,N)
 
   cores = [core(b,k)⊕c for k=1:d]
-  a = TTvector(r, cores)
+  a = TTvector{T,N,d}(r, cores)
 
   return a
 end
@@ -48,7 +48,7 @@ function Base.:-(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
   r[d+1][N] = rank(b,d+1,N)
 
   cores = [core(b,k)⊕( k>1 ? core(c,k) : -core(c,1)) for k=1:d]
-  a = TTvector(r, cores)
+  a = TTvector{T,N,d}(r, cores)
 
   return a
 end
@@ -63,7 +63,7 @@ function Base.:-(b::Number, c::TTvector{T,N,d}) where {T<:Number,N,d}
   r[d+1][N] = rank(b,d+1,N)
 
   cores = [b⊕(k > 1 ? core(c,k) : -core(c,1)) for k=1:d]
-  a = TTvector(r, cores)
+  a = TTvector{T,N,d}(r, cores)
 
   return a
 end

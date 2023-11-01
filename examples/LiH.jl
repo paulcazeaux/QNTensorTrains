@@ -8,13 +8,7 @@ fci = pyimport("pyscf.fci")
 #
 # Create Simple Molecule
 #
-mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "ccpvdz", unit="B", verbose = 3)
-# mol = pyscf.gto.M(atom = "o 0 0 0; o 0 0 1;", basis = "sto3g", verbose = 3)
-# mol = pyscf.gto.M(; atom="""C      0.00000    0.00000    0.00000
-#   H      0.00000    0.00000    1.08900
-#   H      1.02672    0.00000   -0.36300
-#   H     -0.51336   -0.88916   -0.36300
-#   H     -0.51336    0.88916   -0.36300""", basis="sto3g", verbose=3)
+mol = pyscf.gto.M(atom = "Li 0 0 0; H 0 0 1.595;", basis = "ccpvdz", unit="Angstrom", verbose = 3)
 
 # Run HF
 mf = pyscf.scf.RHF(mol).run()
@@ -27,11 +21,10 @@ one_body = mo' * mf.get_hcore() * mo
 two_body = reshape(mol.ao2mo(mf.mo_coeff; aosym=1), n, n, n, n)
 
 # # FCI (i.e. exact diagonalization)
-# cisolver = fci.FCI(mf)
-# cisolver.kernel()
-# println("FCI Energy (Ha): ", cisolver.e_tot)
-# e_tot = cisolver.e_tot
-e_tot = −109.2821727
+cisolver = fci.FCI(mf)
+cisolver.kernel()
+println("FCI Energy (Ha): ", cisolver.e_tot)
+e_tot = cisolver.e_tot
 
 #
 # Setup for MPS Calculation
@@ -54,7 +47,7 @@ for i=1:n,j=1:n,k=1:n,l=1:n
     v[↓(i),↑(j),↓(k),↑(l)] = 1/2 * two_body[i,k,j,l]
     v[↑(i),↓(j),↑(k),↓(l)] = 1/2 * two_body[i,k,j,l]
 end
-v[abs.(v).<1e-8] .= 0
+v[abs.(v).<1e-12] .= 0
 # Reduce two-electron term - condense to i<j and k<l terms
 v = QNTensorTrains.Hamiltonian.reduce(v)
 
@@ -71,27 +64,35 @@ emf = E(ψmf)
 println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
 println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_tot)
 println()
-# ψ0 = perturbation(ψmf, 10, .1)
 
-# @time e, ψ = MALS(t,v,ψ0; reduced=true)
-# display(ψ)
-# @show E(ψ)
-# println("DMRG Error ", abs(e+e_nuclear - e_tot))
-
-@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-6, maxIter=10, rmax=50, reduced=true)
+@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-6, maxIter=20, rmax=50, reduced=true)
+E1 = E(ψ1)
 display(ψ1)
-@show E(ψ1)
-@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=10, rmax=50, reduced=true)
+@show hist1.+e_nuclear.-e_tot, E1-e_tot
+@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=20, rmax=100, reduced=true)
+E2 = E(ψ2)
 display(ψ2)
-@show E(ψ2)
-@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=20, rmax=100, reduced=true)
+@show hist2.+e_nuclear.-e_tot, E2-e_tot
+@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=20, rmax=150, reduced=true)
+E3 = E(ψ3)
 display(ψ3)
-@show E(ψ3)
-println("Lanczos Error ", abs(e3+e_nuclear - e_tot))
+@show hist3.+e_nuclear.-e_tot, E3-e_tot
+println("True Lanczos Residual ", abs(e3+e_nuclear - e_tot))
 
 using Plots
-plot(res1, label="residual")
-plot!(abs.(hist1 .- (e_tot - e_nuclear)), yaxis=:log10, label="eigenvalue error")
-plot!(res2, label="residual - restart")
-plot!(abs.(hist2 .- (e_tot - e_nuclear)), yaxis=:log10, label="eigenvalue error - restart")
+plot(cumsum(length.([hist1, hist2, hist3]).-1), abs.(last.([hist1, hist2, hist3]).- (e_tot - e_nuclear)), 
+            ls=:dot, seriestype=:scatter, yaxis=:log10,
+            yticks=10.0 .^ (floor(log10(abs(e3+e_nuclear-e_tot))):ceil(log10(abs(emf-e_tot)))),
+            label="Final eigenvalue error before restart")
+plot!(res1, label="residual")
+plot!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error")
+
+N = length(res1).+(1:length(res2))
+plot!(N, res2, label="residual - restart")
+plot!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error - restart")
+
+N = (length(res1)+length(res2)).+(1:length(res3))
+plot!(N, res3, label="residual - restart")
+plot!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error - restart 2")
+
 

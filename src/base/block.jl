@@ -33,11 +33,7 @@ function Base.convert(::Type{Block{T}}, b::Tuple{Number,Matrix{T}}) where T<:Num
 end
 
 function Base.convert(::Type{Block{T}}, b::Matrix{T}) where T<:Number
-  if length(b) == 0
-    return Block{T}(size(b,1),size(b,2))
-  else
-    return Block(b)
-  end
+  return Block(b)
 end
 
 function Base.copy(a::Block{T}) where T<:Number

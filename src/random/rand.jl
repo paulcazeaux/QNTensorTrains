@@ -54,10 +54,11 @@ end
 """
 function Base.rand(S, N::Int, d::Int, k::Int,
                     row_ranks::OffsetVector{Int, Vector{Int}}, 
-                    col_ranks::OffsetVector{Int, Vector{Int}})
+                    col_ranks::OffsetVector{Int, Vector{Int}},
+                    ::Type{T}=Float64) where {T<:Number}
 
   @assert eltype(S) <: Number
-  T = float(eltype(S))
+  @assert T == float(eltype(S))
 
 
   A = SparseCore{T,N,d}(k)
@@ -75,7 +76,14 @@ function Base.rand(S, N::Int, d::Int, k::Int,
     # else
     #   σ = 1
     # end
-    A[n,1,n] = Block(float(rand(S,row_ranks[n],col_ranks[n])))
+    a = float(rand(S,row_ranks[n],col_ranks[n]))
+    r = minimum(size(a))
+    if r < 50 # Because the matrix is small, we double check the numerical rank of the sketch matrix
+      while rank(a) < r
+        a = float(rand(S,row_ranks[n],col_ranks[n]))
+      end
+    end
+    A[n,1,n] = Block(a)
     # @show norm(A[n,1,n])
   end
   for n in axes(A.occupied, 1)
@@ -84,7 +92,29 @@ function Base.rand(S, N::Int, d::Int, k::Int,
     # else
     #   σ = 1
     # end
-    A[n,2,n+1] = Block(float(rand(S,row_ranks[n],col_ranks[n+1])))
+    a = float(rand(S,row_ranks[n],col_ranks[n+1]))
+    r = minimum(size(a))
+    if r < 50 # Because the matrix is small, we double check the numerical rank of the sketch matrix
+      if n ∈ axes(A.unoccupied, 1) && n+1 ∈ axes(A.unoccupied, 2)
+        while rank(hcat(data(A.unoccupied[n]),a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1]) &&
+              rank(vcat(data(A.unoccupied[n+1]),a)) < min(row_ranks[n]+row_ranks[n+1], col_ranks[n+1])
+          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
+        end
+      elseif n ∈ axes(A.unoccupied, 1)
+        while rank(hcat(data(A.unoccupied[n]),a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1])
+          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
+        end
+      elseif n+1 ∈ axes(A.unoccupied, 2)
+        while rank(vcat(data(A.unoccupied[n+1]),a)) < min(row_ranks[n]+row_ranks[n+1],col_ranks[n+1])
+          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
+        end
+      else
+        while rank(a) < r
+          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
+        end
+      end
+    end
+    A[n,2,n+1] = Block(a)
     # @show norm(A[n,2,n+1])
   end
   return A
@@ -93,20 +123,21 @@ end
 
 
 """
-    tt = tt_rand(S, d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}})
+    tt = tt_rand(S, Val(d), Val(N), r::Vector{OffsetVector{Int,Vector{Int}}}, [T=Float64])
 
 Compute a d-dimensional TT-tensor with ranks `r` and entries drawn uniformly from the indexable collection `S` for the cores.
 """
-function tt_rand(S, d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}})
+function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}},
+                    ::Type{T}=Float64) where {T<:Number,N,d}
   @assert eltype(S) <: Number
-  T = float(eltype(S))
+  @assert T == float(eltype(S))
 
   @boundscheck (length(r) == d+1) || (length(r) == d-1)
   for k=1:d+1
     @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
   end
 
-  tt = tt_zeros(d,N,T)
+  tt = tt_zeros(Val(d),Val(N),T)
   if length(r) == d+1
     for k=1:d
       @boundscheck axes(r[k],1) == axes(core(tt,k),1)
@@ -134,17 +165,17 @@ function tt_rand(S, d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}})
 end
 
 """
-    tt = tt_randn(d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}}, [T=Float64])
+    tt = tt_randn(Val(d), Val(N), r::Vector{OffsetVector{Int,Vector{Int}}}, [T=Float64])
 
 Compute a d-dimensional TT-tensor with ranks `r` and Gaussian distributed entries for the cores.
 """
-function tt_randn(d::Int, N::Int, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64) where {T<:Number}
+function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64) where {T<:Number,N,d}
   @boundscheck (length(r) == d+1) || (length(r) == d-1)
   for k=1:d+1
     @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
   end
 
-  tt = tt_zeros(d,N,T)
+  tt = tt_zeros(Val(d),Val(N),T)
   if length(r) == d+1
     for k=1:d
       @boundscheck axes(r[k],1) == axes(core(tt,k),1)
@@ -199,7 +230,7 @@ function perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int
       end
     end
   end
-  p = tt_randn(d,N,rp)
+  p = tt_randn(Val(d),Val(N),rp)
   lmul!(ϵ*norm(tt)/norm(p), p)
   return tt + p
 end

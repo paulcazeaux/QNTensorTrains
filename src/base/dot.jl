@@ -167,7 +167,7 @@ function step_core_right_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=fals
 end
 
 function rightOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where {T<:Number,N,d}
-  nrm=[T(0) for k=1:d]
+  nrm=[T(1) for k=1:d]
 
   for k=(tt.orthogonal ? tt.corePosition : d):-1:2
     nrm[k] = step_core_left_norm!!(tt,k,keepRank)
@@ -180,7 +180,7 @@ function rightOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where 
 end
 
 function leftOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where {T<:Number,N,d}
-  nrm=[T(0) for k=1:d]
+  nrm=[T(1) for k=1:d]
 
   for k=(tt.orthogonal ? tt.corePosition : 1):d-1
     nrm[k] = step_core_right_norm!!(tt,k,keepRank)

@@ -52,7 +52,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", tt::TTvector{T,N,d}) where {T<:Number,N,d}
   if get(io, :compact, true)
-    str = "TTvector{$T,$d}. Maximum rank $(maximum(sum.(tt.r)))"
+    str = "TTvector{$T,$N,$d}. Maximum rank $(maximum(sum.(tt.r)))"
   else
     # Manage some formatting and padding
     strr = ["r[i]=$(sum(r))" for r in tt.r]
@@ -60,13 +60,13 @@ function Base.show(io::IO, ::MIME"text/plain", tt::TTvector{T,N,d}) where {T<:Nu
     padr = len .- length.(strr)
     strr = ["$(s)"*" "^(pad+len+3)          for (s,pad) in zip(strr, padr)]
 
-    str = string("TTvector{$T,$d}. Ranks are:\n", strr...)
+    str = string("TTvector{$T,$N,$d}. Ranks are:\n", strr...)
   end
     print(io, str)
 end
 
 function Base.show(io::IO, tt::TTvector{T,N,d}) where {T<:Number,N,d}
-    str = "TTvector{$T,$d}. Maximum rank $(maximum(sum.(tt.r)))"
+    str = "TTvector{$T,$N,$d}. Maximum rank $(maximum(sum.(tt.r)))"
     println(io, str)
     for k=1:d
       println(io)
@@ -92,6 +92,18 @@ end
 Compute the d-dimensional sTT-tensor of all zeros.
 """
 function tt_zeros(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
+  cores = [SparseCore{T,N,d}(k) for k=1:d]
+  r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
+  r[1][0] = 1
+  r[d+1][N] = 1
+
+  tt = TTvector(r, cores)
+  check(tt)
+
+  return tt
+end
+
+function tt_zeros(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
   cores = [SparseCore{T,N,d}(k) for k=1:d]
   r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
   r[1][0] = 1
@@ -129,7 +141,30 @@ function tt_ones(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
   return tt
 end
 
-function tt_state(state::NTuple{N, Int}, d::Int, ::Type{T}=Float64)::TTvector{T,N,d} where {N,T<:Number}
+function tt_ones(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
+  cores = [SparseCore{T,N,d}(k) for k=1:d]
+  r = [[1 for n in occupation_qn(N,d,k)] for k=1:d+1]
+
+  for k=1:d
+    cores[k].row_ranks .= 1
+    cores[k].col_ranks .= 1
+    for n in cores[k].row_qn ∩ cores[k].col_qn
+      cores[k].unoccupied[n] = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n])
+    end
+    for n in cores[k].row_qn ∩ (cores[k].col_qn.-1)
+      cores[k].occupied[n]   = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n+1])
+    end
+  end
+
+  tt = TTvector(r, cores)
+  check(tt)
+
+  return tt
+end
+
+
+
+function tt_state(state::NTuple{N, Int}, ::Val{d}, ::Type{T}=Float64)::TTvector{T,N,d} where {T<:Number,N,d}
   @assert all(1 .≤ state .≤ d)
   @assert allunique(state)
 
@@ -287,7 +322,7 @@ The TT-tensor shares the same underlying data structure with `cores` immediately
 function cores2tensor(cores::Vector{SparseCore{T,N,d}}) where {T<:Number,N,d}
   @assert d == length(cores)
   for k=1:d
-    @assert typeof(cores[k]) == SparseCore{T,N,d} && cores[k].k == k
+    @assert cores[k].k == k
   end
 
   r = [[deepcopy(cores[k].row_ranks) for k=1:d]..., deepcopy(cores[d].col_ranks)]

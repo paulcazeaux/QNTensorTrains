@@ -6,7 +6,6 @@ in the Quantum Number Preserving, Block-Sparse Tensor Train format
 conserving total fermionic particle number.
 """
 module QNTensorTrains
-
 using LinearAlgebra
 import Base: @propagate_inbounds
 
@@ -53,6 +52,7 @@ export randRound_H_MatVec, randRound_H_MatVec!
 
 include("solvers/ALS.jl")
 include("solvers/MALS.jl")
-export ALS, MALS
+include("solvers/lanczos.jl")
+export ALS, MALS, Lanczos, randLanczos
 
 end # module QNTensorTrains

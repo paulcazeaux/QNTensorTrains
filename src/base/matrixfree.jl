@@ -175,7 +175,7 @@ function AdagᵢAⱼ_view(tt_in::TTvector{T,N,d}, i::Int, j::Int) where {T<:Numb
     cores[n] = SparseCore(n,ranks[n],ranks[n+1],unsafe_core)
   end
 
-  tt_out = TTvector(ranks, cores)
+  tt_out = TTvector{T,N,d}(ranks, cores)
 
   # Sanity check for the ranks
   check(tt_out)
@@ -214,7 +214,7 @@ function AdagᵢAdagⱼAₖAₗ_view(tt_in::TTvector{T,N,d}, i::Int, j::Int, k::
   end
 
 
-  tt_out = TTvector(ranks, cores)
+  tt_out = TTvector{T,N,d}(ranks, cores)
   # Sanity check for the ranks
   check(tt_out)
 
@@ -442,7 +442,7 @@ function AdagᵢAⱼ(tt_in::TTvector{T,N,d}, i::Int, j::Int) where {T<:Number,N,
 
   end
 
-  tt_out = TTvector(ranks, cores)
+  tt_out = TTvector{T,N,d}(ranks, cores)
   # Sanity check for the ranks
   check(tt_out)
   return tt_out
@@ -478,7 +478,7 @@ function AdagᵢAdagⱼAₖAₗ(tt_in::TTvector{T,N,d}, i::Int, j::Int, k::Int, 
 
   shift_ranks!(ranks[d+1], rank(tt_in, d+1), flux, nl, nr, N)
 
-  tt_out = TTvector(ranks, cores)
+  tt_out = TTvector{T,N,d}(ranks, cores)
   # Sanity check for the ranks
   check(tt_out)
 

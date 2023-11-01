@@ -4,7 +4,7 @@ using LinearAlgebra, OffsetArrays
 
 export sparse_H_matvec, H_matvec, RayleighQuotient
 
-function reduce(v::Array{T,4}) where {T<:Number}
+function reduce(v::Array{T,4}, tol=16eps(real(T))) where {T<:Number}
   d = size(v,1)
   @boundscheck @assert size(v) == (d,d,d,d)
 
@@ -12,6 +12,7 @@ function reduce(v::Array{T,4}) where {T<:Number}
   for i=1:d, k=1:d, j=i+1:d, l=k+1:d
     v_reduced[i,j,k,l] = v[i,j,k,l]+v[j,i,l,k]-v[j,i,k,l]-v[i,j,l,k]
   end
+  v_reduced[abs.(v_reduced).<tol] .= 0
 
   return v_reduced
 end
@@ -1159,13 +1160,11 @@ function RayleighQuotient(tt_in::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}; r
     @assert size(t) == (d,d)
     @assert size(v) == (d,d,d,d)
   end
-
   if (orthogonalize)
     rightOrthogonalize!(tt_in)
   end
 
   reduced || (v = reduce(v))
-
   p = OffsetVector([n == N ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
 
   for k=d:-1:1
@@ -1175,16 +1174,55 @@ function RayleighQuotient(tt_in::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}; r
       Pl = zeros(T, HXₖ[1][l], Xₖ.row_ranks[l])
       for r in axes(Xₖ,3) ∩ (l:l+1)
         if isnonzero(Xₖ,l,r)
+          Vp = zeros(T, HXₖ[1][l], Xₖ.col_ranks[r])
           for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
             if isnonzero(V,l,r)
-              mul!( view(Pl, I[l], :), 
-                    data(V[l,r]),
-                    p[r][J[r],:] * adjoint(data(Xₖ[l,r])),
-                    factor(V[l,r]) * conj(factor(Xₖ[l,r])),
-                    T(1)
+              mul!( view(Vp, I[l], :), data(V[l,r]), view(p[r],J[r],:),
+                    factor(V[l,r]), T(1)
                   )
             end
           end
+          mul!(Pl, Vp, adjoint(data(Xₖ[l,r])), conj(factor(Xₖ[l,r])), T(1))
+        end
+      end
+      p[l] = Pl
+    end
+  end
+
+  return p[0][1]
+end
+
+function xᵀHy(x::TTvector{T,N,d}, y::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}; reduced::Bool=false, orthogonalize::Bool=false) where {T<:Number,N,d}
+  @boundscheck begin
+    @assert size(t) == (d,d)
+    @assert size(v) == (d,d,d,d)
+  end
+
+  if (orthogonalize)
+    rightOrthogonalize!(x)
+    rightOrthogonalize!(y)
+  end
+
+  reduced || (v = reduce(v))
+
+  p = OffsetVector([n == N ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
+
+  for k=d:-1:1
+    Xₖ = core(tt_in,k)
+    HYₖ = sparse_H_matvec(core(y,k), t, v)
+    for l in axes(Xₖ,1)
+      Pl = zeros(T, HYₖ[1][l], Xₖ.row_ranks[l])
+      for r in axes(Xₖ,3) ∩ (l:l+1)
+        if isnonzero(Xₖ,l,r)
+          Vp = zeros(T, HXₖ[1][l], Xₖ.col_ranks[r])
+          for (I,J,V) in zip(HYₖ[3],HYₖ[4],HYₖ[5])
+            if isnonzero(V,l,r)
+              mul!( view(Vp, I[l], :), data(V[l,r]), p[r][J[r],:],
+                    factor(V[l,r]), T(1)
+                  )
+            end
+          end
+          mul!(Pl, Vp, adjoint(data(Xₖ[l,r])), conj(factor(Xₖ[l,r])), T(1))
         end
       end
       p[l] = Pl

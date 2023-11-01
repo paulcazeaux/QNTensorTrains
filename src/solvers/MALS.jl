@@ -42,10 +42,11 @@ function MALSForwardSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::
 
   λ = T(0)
   ep = ε/sqrt(d-1)
+  println("Forward Sweep:")
   for k=1:d-1
     # Assumption: `x` is orthogonal with core at `k`
     @boundscheck @assert x.corePosition == k
-
+    print("$k... ")
     # Compute new cores.
     vals, vecs, info = KrylovKit.eigsolve(
                           core_pair -> FramedHamiltonian(core_pair,t,v,Wᴸ,Wᴿ[k+1]), 
@@ -76,7 +77,9 @@ function MALSBackSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Flo
 
   λ = T(0)
   ep = ε/sqrt(d-1)
+  println("Backward Sweep:")
   for k=d-2:-1:1
+    print("$k... ")
     # Assumption: `x` is orthogonal with core at `k+1`
     @boundscheck @assert x.corePosition == k+1
 

@@ -12,7 +12,7 @@ function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, target_
   cores = [SparseCore{T,N,d}(k) for k=1:d]
 
   # Use Rademacher randomized cores for framing
-  Ω = tt_rand((-1,1), d,N,target_r)
+  Ω = tt_rand((-1,1), Val(d),Val(N),target_r)
 
   # Precompute partial projections W
   W = [ [zeros(T,0,0) for n in axes(cores[k],3), S in summands] for k=1:d]
@@ -100,6 +100,6 @@ end
 Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and oversampling `over`.
 """
 function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d}
-  target_r = [[(k∈(1,d+1) ? 1 : rmax+over) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  return round_global!(roundRandSum(α,summands,target_r), rmax=rmax)
+  target_r = [[min(rmax+over, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  return round!(roundRandSum(α,summands,target_r), rmax=rmax)
 end
