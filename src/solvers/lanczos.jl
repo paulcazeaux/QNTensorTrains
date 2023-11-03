@@ -95,7 +95,7 @@ end
 end
 @timeit to "Orthonormalization" begin
   q, nrm = leftOrthonormalize!!(q̃)
-  round!(q, tol^2)
+  round!(q, tol, rmax=rmax)
 end
 @timeit to "RayleighQuotient" begin
   α = RayleighQuotient(q, t, v; reduced=true)
@@ -119,13 +119,9 @@ end
 @timeit to "MatVec" begin
     q̃ = randRound_H_MatVecAdd([1,-α,-β], [Q[end],Q[end],Q[end-1]], t, v, rmax, over)
 end
-# @timeit to "Orthogonalize" begin
-#     Aq = H_matvec(Q[end], t, v, reduced=true)
-#     q̃ = roundRandSum([1,-α,-β], [Aq, Q[end], Q[end-1]], rmax, over)
-# end
 @timeit to "Orthonormalization" begin
     q, nrm = leftOrthonormalize!!(q̃)
-    round!(q, tol^2, rmax=rmax)
+    round!(q, tol, rmax=rmax)
 end
 @timeit to "RayleighQuotient" begin
     α = RayleighQuotient(q, t, v; reduced=true)
@@ -138,22 +134,24 @@ end
     γ = F.vectors[:,1]
 end
 
+    @show α, β, β*abs(γ[end])
+    if β*abs(γ[end]) < tol
+      break
+    end
+
+    if β*abs(γ[end]) > 2res[end]
+      @warn "Terminating Lanczos iterations - inexact breakdown"
+      break
+    end
+
     push!(Q,  q)
     push!(dv, α)
     push!(ev, β)
     push!(res, β*abs(γ[end]))
-
-    @show res[end]
-    if res[end] < tol
-      break
-    end
   end
   end
 
   display(to)
-  F = eigen(SymTridiagonal(dv, ev))
-  push!(λ, F.values[1])
-  γ = F.vectors[:,1]
 @timeit to "Assemble eigenvector" begin
   w, = leftOrthonormalize!!(roundRandSum(γ, Q, rmax, over))
 end

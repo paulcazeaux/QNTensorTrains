@@ -47,9 +47,8 @@ for i=1:n,j=1:n,k=1:n,l=1:n
     v[↓(i),↑(j),↓(k),↑(l)] = 1/2 * two_body[i,k,j,l]
     v[↑(i),↓(j),↑(k),↓(l)] = 1/2 * two_body[i,k,j,l]
 end
-v[abs.(v).<1e-12] .= 0
 # Reduce two-electron term - condense to i<j and k<l terms
-v = QNTensorTrains.Hamiltonian.reduce(v)
+v = QNTensorTrains.Hamiltonian.reduce(v, tol=1e-12)
 
 E(ψ) = RayleighQuotient(ψ,t,v; reduced=true) + e_nuclear
 
@@ -65,15 +64,15 @@ println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
 println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_tot)
 println()
 
-@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-6, maxIter=20, rmax=50, reduced=true)
+@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-12, maxIter=30, rmax=50, reduced=true)
 E1 = E(ψ1)
 display(ψ1)
 @show hist1.+e_nuclear.-e_tot, E1-e_tot
-@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=20, rmax=100, reduced=true)
+@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=10, rmax=100, reduced=true)
 E2 = E(ψ2)
 display(ψ2)
 @show hist2.+e_nuclear.-e_tot, E2-e_tot
-@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=20, rmax=150, reduced=true)
+@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=10, rmax=150, reduced=true)
 E3 = E(ψ3)
 display(ψ3)
 @show hist3.+e_nuclear.-e_tot, E3-e_tot
@@ -84,15 +83,13 @@ plot(cumsum(length.([hist1, hist2, hist3]).-1), abs.(last.([hist1, hist2, hist3]
             ls=:dot, seriestype=:scatter, yaxis=:log10,
             yticks=10.0 .^ (floor(log10(abs(e3+e_nuclear-e_tot))):ceil(log10(abs(emf-e_tot)))),
             label="Final eigenvalue error before restart")
-plot!(res1, label="residual")
-plot!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error")
+scatter!([res1;res2;res3], label="residual")
+scatter!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 50")
 
 N = length(res1).+(1:length(res2))
-plot!(N, res2, label="residual - restart")
-plot!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error - restart")
+scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 100")
 
 N = (length(res1)+length(res2)).+(1:length(res3))
-plot!(N, res3, label="residual - restart")
-plot!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="eigenvalue error - restart 2")
+scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 150")
 
 

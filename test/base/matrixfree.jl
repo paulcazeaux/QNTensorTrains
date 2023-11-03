@@ -7,12 +7,12 @@
   s1 = (2,4)
   s2 = (2,5)
 
-  x0 = tt_state(s1, d) + tt_state(s2, d)
+  x0 = tt_state(s1, Val(d)) + tt_state(s2, Val(d))
 
   x = deepcopy(x0); AdagᵢAⱼ!(x, 1,2)
   y = AdagᵢAⱼ(x0, 1,2)
 
-  ref = (tt_state((1,4),d)+tt_state((1,5),d))
+  ref = (tt_state((1,4),Val(d))+tt_state((1,5),Val(d)))
   norm(x-ref) + norm(y-ref) ≈ 0
 end
 
@@ -27,11 +27,11 @@ end
   s2 = (6,5)
   s3 = (2,3)
 
-  x0 = tt_state(s1, d) + tt_state(s2, d) + tt_state(s3, d)
+  x0 = tt_state(s1, Val(d)) + tt_state(s2, Val(d)) + tt_state(s3, Val(d))
   x = deepcopy(x0); AdagᵢAⱼ!(x, 5,4)
   y = AdagᵢAⱼ(x0, 5,4)
   
-  ref = tt_state((5,6), d)
+  ref = tt_state((5,6), Val(d))
   norm(x - ref) + norm(y - ref) ≈ 0
 end
 
@@ -67,9 +67,9 @@ function twobody_test(i,j,k,l)
 
   ref_s = (i, j, s[3:N]...)
 
-  p = round(tt_randn(d,N,r)); rmul!(p, 1/norm(p))
+  p = round(tt_randn(Val(d),Val(N),r)); rmul!(p, 1/norm(p))
   Skl = delete!(delete!(Set(1:d),k),l)
-  x0 = tt_state(s, d) + AdagᵢAⱼ(p, rand(Skl), k) + AdagᵢAⱼ(p, rand(Skl), l) # Random perturbation that should go to zero
+  x0 = tt_state(s, Val(d)) + AdagᵢAⱼ(p, rand(Skl), k) + AdagᵢAⱼ(p, rand(Skl), l) # Random perturbation that should go to zero
   x = deepcopy(x0); AdagᵢAdagⱼAₖAₗ!(x, i,j,k,l)
   y = AdagᵢAdagⱼAₖAₗ(x0, i,j,k,l)
 
@@ -114,12 +114,12 @@ end
   s2 = (1,5)
   s3 = (3,4)
 
-  x0 = tt_state(s1, d) + tt_state(s2, d) + tt_state(s3, d)
+  x0 = tt_state(s1, Val(d)) + tt_state(s2, Val(d)) + tt_state(s3, Val(d))
 
   x = deepcopy(x0); AdagᵢAⱼ!(x, 2,1); AdagᵢAⱼ!(x, 4,4)
   y = AdagᵢAⱼ( AdagᵢAⱼ(x0, 2,1), 4,4)
 
-  ref = tt_state((2,4), d)
+  ref = tt_state((2,4), Val(d))
   norm(x - ref, :LR) + norm(y - ref, :LR) ≈ 0
 end
 

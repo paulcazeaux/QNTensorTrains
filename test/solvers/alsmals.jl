@@ -5,7 +5,7 @@ d = 9
 N = 5
 
 r = [ [ (k in (1,d+1) ? 1 : rand(2:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(d,N,r)
+x0 = tt_randn(Val(d),Val(N),r)
 
 for i=1:d, j=1:d
   @test begin
@@ -26,7 +26,7 @@ d = 6
 N = 2
 
 r = [ [ (k in (1,d+1) ? 1 : rand(5:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(d,N,r)
+x0 = tt_randn(Val(d),Val(N),r)
 
 for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d
   @test begin

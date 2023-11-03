@@ -70,7 +70,7 @@ end
   N = 6
 
   r = [ [ (k in (1,d+1) ? 1 : rand(0:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = tt_randn(d,N,r)
+  x = tt_randn(Val(d),Val(N),r)
   X = Array(x)
   
   pass=true
@@ -111,8 +111,8 @@ end
   r1 = [ [ (k in (1,d+1) ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   r2 = [ [ (k in (1,d+1) ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x1 = tt_randn(d,N,r1)
-  x2 = tt_randn(d,N,r2)
+  x1 = tt_randn(Val(d),Val(N),r1)
+  x2 = tt_randn(Val(d),Val(N),r2)
   X1 = Array(x1)
   X2 = Array(x2)
   α = randn()
@@ -130,8 +130,8 @@ end
   r1 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   r2 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x1 = tt_randn(d,N,r1)
-  x2 = tt_randn(d,N,r2)
+  x1 = tt_randn(Val(d),Val(N),r1)
+  x2 = tt_randn(Val(d),Val(N),r2)
   X1 = Array(x1)
   X2 = Array(x2)
   α = randn()
@@ -148,7 +148,7 @@ end
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x = tt_randn(d,N,r)
+  x = tt_randn(Val(d),Val(N),r)
   c = pi
   X = Array(x)
 
@@ -165,8 +165,8 @@ end
   r1 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   r2 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   
-  x1 = tt_randn(d,N,r1)
-  x2 = tt_randn(d,N,r2)
+  x1 = tt_randn(Val(d),Val(N),r1)
+  x2 = tt_randn(Val(d),Val(N),r2)
   X1 = Array(x1)
   X2 = Array(x2)
 

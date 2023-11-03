@@ -307,6 +307,10 @@ end
 
 
 function randRound_H_MatVecAdd(α::Vector{T}, tts::Vector{TTvector{T,N,d}}, t::Matrix{T}, v::Array{T,4}, rmax::Int, over::Int) where {T<:Number,N,d}
-  target_r = [[min(rmax+over, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  target_r = [[min(rmax, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  for k=2:d
+    target_r[k] .+= over
+  end
+             # [[(k∈(1,d+1) ? 1 : rmax+over) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   return randRound_H_MatVecAdd(α,tts,t,v,target_r)
 end

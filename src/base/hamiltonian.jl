@@ -4,7 +4,7 @@ using LinearAlgebra, OffsetArrays
 
 export sparse_H_matvec, H_matvec, RayleighQuotient
 
-function reduce(v::Array{T,4}, tol=16eps(real(T))) where {T<:Number}
+function reduce(v::Array{T,4}; tol=16eps(real(T))) where {T<:Number}
   d = size(v,1)
   @boundscheck @assert size(v) == (d,d,d,d)
 

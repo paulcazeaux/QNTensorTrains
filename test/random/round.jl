@@ -6,10 +6,11 @@ function draw!(ω)
   return i
 end
 
-function draw_state(d,N)
+function draw_state(::Val{d}, ::Val{N})
   ω = Set(1:d)
-  s = ((draw!(ω) for i=1:N)..., )
-  return tt_state(s, d)
+  s = ntuple(i->draw!(ω), Val(N))
+
+  return tt_state(s, Val(d))
 end
 
 # Round
@@ -19,7 +20,7 @@ end
   N = 7
   tol = 1e-3
 
-  x0 = round!(draw_state(d,N) + draw_state(d,N))
+  x0 = round!(draw_state(Val(d),Val(N)) + draw_state(Val(d),Val(N)))
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:20)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   p = round(tt_randn(d,N,r,T))

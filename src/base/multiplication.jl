@@ -70,7 +70,7 @@ function times(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
   r = [rank(b,k).*rank(c,k) for k=1:d+1]
   cores = [core(b,k)⊗core(c,k) for k = 1:d]
 
-  return TTvector{T,N,d}(r, cores)
+  return TTvector(r, cores)
 end
 
 """
