@@ -77,3 +77,21 @@ function Base.sum(tt::TTvector{T,N,d}) where {T<:Number,N,d}
   e = tt_ones(size(tt),T)
   return dot(e,tt)
 end
+
+"""
+  roundSum(α::Vector{Number}, summands::Vector{TTvector{T,N,d}}, tol::Float64)
+
+Computes the sum of vectors `summands` with coefficients `α`, rounding the result with precision `ϵ`.
+"""
+function roundSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, tol::Float64) where {T1<:Number,T<:Number,N,d}
+  if length(summands) == 1
+    return round!(α[1] * summands[1], tol)
+  elseif length(summands) == 2
+    return round!(α[1] * summands[1] + α[2] * summands[2], tol)
+  else
+    n = length(α)÷2
+    x = roundSum(α[1:n],summands[1:n], tol/3)
+    y = roundSum(α[n+1:end], summands[n+1:end], tol/3)
+    return round!(x+y, tol/3)
+  end
+end

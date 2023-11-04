@@ -25,7 +25,7 @@ function Lanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
 
   F = eigen(SymTridiagonal(dv, ev))
   λ, γ = F.values[1], F.vectors[:,1]
-  w = roundSum(γ, Q, ϵ=tol)
+  w = roundSum(γ, Q, tol)
   r = norm(H_matvec(w, t, v) - λ*w, :RL)
     
   if r > tol 
@@ -42,24 +42,14 @@ function Lanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
 
     F = eigen(SymTridiagonal(dv, ev))
     λ, γ = F.values[1], F.vectors[:,1]
-    w = roundSum(γ, Q, ϵ=tol)
+    w = roundSum(γ, Q, tol)
     r = norm(H_matvec(w, t, v) - λ*w, :RL)
 
     O = zeros(k+1,k+1)
     for i=1:k+1, j=1:k+1
       O[i,j] = dot(Q[i],Q[j],orthogonalize=true)
     end
-
-    @show λ, r, norm(w)
-    @show γ
-    display(O)
-    display(SymTridiagonal(dv, ev))
-
-    # w2 = roundRandSum(γ, Q, rmax, over)
-    # @show norm(w-w2, :LR)
-    # if norm(w-w2, :LR) > .1
-    #   @warn "rank deficient sketch"
-    # end
+    
     if r < tol 
       break
     end
@@ -134,7 +124,7 @@ end
     @show α, β, β*abs(γ[end])
     if β*abs(γ[end]) < tol
       break
-    elseif β*abs(γ[end]) > 2res[end]
+    elseif β*abs(γ[end]) > 2minimum(res)
       @warn "Terminating Lanczos iterations - inexact breakdown"
       break
     end

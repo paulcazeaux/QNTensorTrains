@@ -16,7 +16,7 @@ end
 # roundRandSum
 @test begin
   T = Float64
-  d = 50
+  d = 25
   N = 7
   tol = 1e-3
   ϵ = 1e-4

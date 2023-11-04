@@ -34,7 +34,7 @@ end
 
   # Build tensor with rank 5 but ϵ-perturbations of random rank 1 state
   r = [[(k∈(1,d+1) ? 1 : 5) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = approx_state(d,N,r,ϵ)
+  x = approx_state(Val(d),Val(N),r,ϵ)
 
   # Explicit matvec
   yref = H_matvec(x,t,v)

@@ -100,7 +100,7 @@ end
 Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and oversampling `over`.
 """
 function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d}
-  target_r = [[min(rmax+over, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  target_r = [[min(rmax, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   for k=2:d
     target_r[k] .+= over
   end

@@ -8,8 +8,8 @@ fci = pyimport("pyscf.fci")
 #
 # Create Simple Molecule
 #
-mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "ccpvdz", unit="B", verbose = 3)
-# mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "sto3g", unit="B", verbose = 3)
+# mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "ccpvdz", unit="B", verbose = 3)
+mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "sto3g", unit="B", verbose = 3)
 
 # Run HF
 mf = pyscf.scf.RHF(mol).run()
@@ -22,12 +22,12 @@ one_body = mo' * mf.get_hcore() * mo
 two_body = reshape(mol.ao2mo(mf.mo_coeff; aosym=1), n, n, n, n)
 
 # FCI (i.e. exact diagonalization) from literature
-e_tot = −109.2821727
+# e_tot = −109.2821727
 # # FCI (i.e. exact diagonalization)
-# cisolver = fci.FCI(mf)
-# cisolver.kernel()
-# println("FCI Energy (Ha): ", cisolver.e_tot)
-# e_tot = cisolver.e_tot
+cisolver = fci.FCI(mf)
+cisolver.kernel()
+println("FCI Energy (Ha): ", cisolver.e_tot)
+e_tot = cisolver.e_tot
 
 
 #
@@ -68,15 +68,15 @@ println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
 println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_tot)
 println()
 
-@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-12, maxIter=30, rmax=50, reduced=true)
+@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-4, maxIter=20, rmax=50, over=15, reduced=true)
 E1 = E(ψ1)
 display(ψ1)
 @show hist1.+e_nuclear.-e_tot, E1-e_tot
-@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=10, rmax=100, reduced=true)
+@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=20, rmax=100, over=20, reduced=true)
 E2 = E(ψ2)
 display(ψ2)
 @show hist2.+e_nuclear.-e_tot, E2-e_tot
-@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=10, rmax=150, reduced=true)
+@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=20, rmax=150, over=20, reduced=true)
 E3 = E(ψ3)
 display(ψ3)
 @show hist3.+e_nuclear.-e_tot, E3-e_tot

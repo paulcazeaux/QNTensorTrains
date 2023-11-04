@@ -7,8 +7,7 @@ and the randomized sketching and truncation of the result as a TT-vector with re
 The Hamiltonian is given in terms of one-electron integrals `t_{ij}` and two-electron integrals `v_{ijkl}`.
 Truncates the ranks of the matrix-vector product with `tt_in` with specified ranks `target_r`.
 """
-function randRound_H_MatVec(tt_in::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}, target_r::Vector{OffsetVector{Int,Vector{Int}}},
-      to) where {T<:Number,N,d}
+function randRound_H_MatVec(tt_in::TTvector{T,N,d}, t::Matrix{T}, v::Array{T,4}, target_r::Vector{OffsetVector{Int,Vector{Int}}}) where {T<:Number,N,d}
   @assert target_r[  1][0] == rank(tt_in,  1,0) == 1
   @assert target_r[d+1][N] == rank(tt_in,d+1,N) == 1
 

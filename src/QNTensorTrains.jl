@@ -23,7 +23,7 @@ include("base/complex.jl")
 export TTvector, SparseCore, core, ⊕
 export tt_zeros, tt_ones, tt_state
 export move_core!, round!, round_global!
-export times, power, lognorm
+export times, power, lognorm, roundSum
 include("base/tangent.jl")
 export TTtangent, component, retract, transport
 
