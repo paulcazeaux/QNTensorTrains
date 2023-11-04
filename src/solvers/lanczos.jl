@@ -1,10 +1,8 @@
 using LinearAlgebra, TimerOutputs
 
 
-const over = 5
-
 function Lanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
-                  tol::Float64 = 1e-4, rmax=100, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
+                  tol::Float64 = 1e-4, rmax=100, over=5, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
   reduced || (v = Hamiltonian.reduce(v))
 
   q0, = leftOrthonormalize!!(deepcopy(x0))
@@ -74,7 +72,7 @@ function Lanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
 end
 
 function randLanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
-                  tol::Float64 = 1e-4, rmax=100, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
+                  tol::Float64 = 1e-4, rmax=100, over = 5, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
 
   to = TimerOutput()
   reduced || (v = Hamiltonian.reduce(v))
@@ -88,6 +86,7 @@ end
   Q  = [q0]
   dv = [α ]
   ev = zeros(T,0)
+  res = zeros(T,0)
 
   # k=1
 @timeit to "MatVec" begin
@@ -105,16 +104,14 @@ end
   F = eigen(SymTridiagonal(dv, ev))
   λ = [F.values[1]]
   γ = F.vectors[:,1]
-  res = [β*abs(γ[end])]
 end
 
-  push!(Q,  q)
-  push!(dv, α)
-  push!(ev, β)
-
-@show res[end]
-  if res[end] > tol
+  if β*abs(γ[end]) > tol
   for k=2:maxIter-1
+    push!(Q,  q)
+    push!(dv, α)
+    push!(ev, β)
+    push!(res, β*abs(γ[end]))
 
 @timeit to "MatVec" begin
     q̃ = randRound_H_MatVecAdd([1,-α,-β], [Q[end],Q[end],Q[end-1]], t, v, rmax, over)
@@ -137,17 +134,10 @@ end
     @show α, β, β*abs(γ[end])
     if β*abs(γ[end]) < tol
       break
-    end
-
-    if β*abs(γ[end]) > 2res[end]
+    elseif β*abs(γ[end]) > 2res[end]
       @warn "Terminating Lanczos iterations - inexact breakdown"
       break
     end
-
-    push!(Q,  q)
-    push!(dv, α)
-    push!(ev, β)
-    push!(res, β*abs(γ[end]))
   end
   end
 

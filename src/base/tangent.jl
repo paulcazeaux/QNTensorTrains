@@ -266,8 +266,8 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
   for l in axes(cores[1],1), r in (l:l+1)∩axes(cores[1],3)
     if isnonzero(component(dx,1),l,r) || isnonzero(core(dx.baseL,1),l,r)
       X = zeros(T,rank(dx,1,l),2*rank(dx,2,r))
-      axpy!(α, component(dx, 1)[l,r], X[:, 1:rank(dx,2,r)    ])
-      axpy!(1, core(dx.baseL,1)[l,r], X[:, rank(dx,2,r)+1:end])
+      axpy!(α, component(dx, 1)[l,r], @view X[:, 1:rank(dx,2,r)    ])
+      axpy!(1, core(dx.baseL,1)[l,r], @view X[:, rank(dx,2,r)+1:end])
     else
       X = zeros_block(T,rank(dx,1,l),2*rank(dx,2,r))
     end
@@ -278,9 +278,9 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
     for l in axes(cores[k],1), r in (l:l+1)∩axes(cores[k],3)
       if isnonzero(core(dx.baseR, k),l,r) || isnonzero(component(dx,k),l,r) || isnonzero(core(dx.baseL,k),l,r)
         X = zeros(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-        axpy!(1, core(dx.baseR,k)[l,r], X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ])
-        axpy!(α, component(dx, k)[l,r], X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ])
-        axpy!(1, core(dx.baseL,k)[l,r], X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end])
+        axpy!(1, core(dx.baseR,k)[l,r], @view X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ])
+        axpy!(α, component(dx, k)[l,r], @view X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ])
+        axpy!(1, core(dx.baseL,k)[l,r], @view X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end])
       else
         X = zeros_block(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
       end
@@ -291,9 +291,9 @@ function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,
   for l in axes(cores[d],1), r in (l:l+1)∩axes(cores[d],3)
     if isnonzero(core(dx.baseR,d),l,r) && isnonzero(component(dx,d),l,r)
       X = zeros(T,2*rank(dx,d,l),rank(dx,d+1,r))
-      axpy!(1, core(dx.baseR,d)[l,r], X[1:rank(dx,d)[l],    :])
-      axpy!(1, core(dx.baseR,d)[l,r], X[rank(dx,d)[l]+1:end,:])
-      axpy!(α, component(dx, d)[l,r], X[rank(dx,d)[l]+1:end,:])
+      axpy!(1, core(dx.baseR,d)[l,r], @view X[1:rank(dx,d)[l],    :])
+      axpy!(1, core(dx.baseL,d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
+      axpy!(α, component(dx, d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
     else
       X = zeros_block(T,2*rank(dx,d,l),rank(dx,d+1,r))
     end

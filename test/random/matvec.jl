@@ -6,10 +6,11 @@ function draw!(ω)
   return i
 end
 
-function approx_state(d,N,r,ϵ)
+function approx_state(::Val{d},::Val{N},r,ϵ) where {N,d}
   ω = Set(1:d)
-  s = ((draw!(ω) for i=1:N)..., )
-  return round!(perturbation(tt_state(s, d),r,ϵ))
+  s = ntuple(i->draw!(ω), Val(N))
+
+  return round!(perturbation(tt_state(s, Val(d)),r,ϵ))
 end
 
 # roundRandSum

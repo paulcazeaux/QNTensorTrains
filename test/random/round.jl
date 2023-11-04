@@ -1,4 +1,3 @@
-
 # Helper draw function
 function draw!(ω)
   i = rand(ω)
@@ -6,7 +5,7 @@ function draw!(ω)
   return i
 end
 
-function draw_state(::Val{d}, ::Val{N})
+function draw_state(::Val{d}, ::Val{N}) where {d,N}
   ω = Set(1:d)
   s = ntuple(i->draw!(ω), Val(N))
 
@@ -23,7 +22,7 @@ end
   x0 = round!(draw_state(Val(d),Val(N)) + draw_state(Val(d),Val(N)))
 
   r = [ [ (k==1 || k==d+1 ? 1 : rand(0:20)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  p = round(tt_randn(d,N,r,T))
+  p = round(tt_randn(Val(d),Val(N),r,T))
   lmul!(tol/2 * norm(x0)/norm(p,:LR), p)
 
   x = round(x0 + p)

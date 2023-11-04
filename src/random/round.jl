@@ -12,7 +12,7 @@ function roundRandOrth!(tt::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,V
 
   # Use Rademacher cores
   rΩ = [target_r[k] .+ (1<k≤d ? over : 0) for k=1:d+1]
-  Ω = tt_rand((-1,1), Val{d},Val{N},rΩ)
+  Ω = tt_rand((-1,1), Val(d),Val(N), rΩ)
 
   # Precompute partial projections W
   W = [[zeros(T,0,0) for n in axes(core(tt,k),3)] for k=1:d]

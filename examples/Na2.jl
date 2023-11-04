@@ -8,7 +8,8 @@ fci = pyimport("pyscf.fci")
 #
 # Create Simple Molecule
 #
-mol = pyscf.gto.M(atom = "Li 0 0 0; H 0 0 1.595;", basis = "ccpvdz", unit="Angstrom", verbose = 3)
+mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "ccpvdz", unit="B", verbose = 3)
+# mol = pyscf.gto.M(atom = "N 0 0 0; N 0 0 2.118;", basis = "sto3g", unit="B", verbose = 3)
 
 # Run HF
 mf = pyscf.scf.RHF(mol).run()
@@ -20,11 +21,14 @@ n = size(mo, 1)
 one_body = mo' * mf.get_hcore() * mo
 two_body = reshape(mol.ao2mo(mf.mo_coeff; aosym=1), n, n, n, n)
 
+# FCI (i.e. exact diagonalization) from literature
+e_tot = −109.2821727
 # # FCI (i.e. exact diagonalization)
-cisolver = fci.FCI(mf)
-cisolver.kernel()
-println("FCI Energy (Ha): ", cisolver.e_tot)
-e_tot = cisolver.e_tot
+# cisolver = fci.FCI(mf)
+# cisolver.kernel()
+# println("FCI Energy (Ha): ", cisolver.e_tot)
+# e_tot = cisolver.e_tot
+
 
 #
 # Setup for MPS Calculation
@@ -37,8 +41,8 @@ d = 2n
 t = zeros(d,d)
 v = zeros(d,d,d,d)
 for i=1:n, j=1:n
-	t[↑(i),↑(j)] = one_body[i,j]
-	t[↓(i),↓(j)] = one_body[i,j]
+    t[↑(i),↑(j)] = one_body[i,j]
+    t[↓(i),↓(j)] = one_body[i,j]
 end
 # Mindful of chemists' notation index ordering
 for i=1:n,j=1:n,k=1:n,l=1:n
@@ -92,5 +96,4 @@ scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 100")
 
 N = (length(res1)+length(res2)).+(1:length(res3))
 scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 150")
-
 
