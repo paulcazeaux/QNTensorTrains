@@ -12,7 +12,7 @@ function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, target_
   cores = [SparseCore{T,N,d}(k) for k=1:d]
 
   # Use Rademacher randomized cores for framing
-  Ω = tt_rand((-1,1), Val(d),Val(N),target_r)
+  Ω = tt_randn(Val(d),Val(N),target_r)
 
   # Precompute partial projections W
   W = [ [zeros(T,0,0) for n in axes(cores[k],3), S in summands] for k=1:d]

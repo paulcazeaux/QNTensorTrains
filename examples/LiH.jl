@@ -75,22 +75,21 @@ display(ψ2)
 @time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=10, rmax=150, reduced=true)
 E3 = E(ψ3)
 display(ψ3)
-@show hist3.+e_nuclear.-e_tot, E3-e_tot
-println("True Lanczos Residual ", abs(e3+e_nuclear - e_tot))
 
 using Plots
 plot(cumsum(length.([hist1, hist2, hist3]).-1), abs.(last.([hist1, hist2, hist3]).- (e_tot - e_nuclear)), 
             ls=:dot, seriestype=:scatter, yaxis=:log10,
             yticks=10.0 .^ (floor(log10(abs(e3+e_nuclear-e_tot))):ceil(log10(abs(emf-e_tot)))),
-            label="Final eigenvalue error before restart",
+            label="Final eigenvalue error (before restart)",
             legend=:bottomleft)
-scatter!([res1;res2;res3], label="residual")
-scatter!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 50")
+scatter!([res1;res2;res3], label="Residual")
+scatter!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 50")
 
 N = length(res1).+(1:length(res2))
-scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 100")
+scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 100")
 
 N = (length(res1)+length(res2)).+(1:length(res3))
-scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 150")
-
-
+scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 150")
+xlabel!("Iterations")
+ylabel!("Error (Ha)")
+savefig("LiH_ccpvdz.pdf")

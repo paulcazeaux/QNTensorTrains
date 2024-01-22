@@ -96,4 +96,6 @@ scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 100")
 
 N = (length(res1)+length(res2)).+(1:length(res3))
 scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="rmax = 150")
-
+xlabel!("Iterations")
+ylabel!("Error (Ha)")
+savefig("N2_sto3g.pdf")
