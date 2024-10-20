@@ -6,7 +6,7 @@ in the Quantum Number Preserving, Block-Sparse Tensor Train format
 conserving total fermionic particle number.
 """
 module QNTensorTrains
-using LinearAlgebra
+using LinearAlgebra, Random
 import Base: @propagate_inbounds
 
 include("base/util.jl")
@@ -39,15 +39,16 @@ export Adag!, A!, AdagA!, S!, Id!
 export AdagᵢAⱼ!, AdagᵢAdagⱼAₖAₗ!
 
 using .Hamiltonian
-export sparse_H_matvec, H_matvec, RayleighQuotient
+export SparseHamiltonian, H_matvec_core, H_matvec, RayleighQuotient, xᵀHy
 
 include("random/rand.jl")
 include("random/round.jl")
 include("random/sum.jl")
 include("random/matvec.jl")
-export tt_rand,tt_randn, perturbation
+export tt_rand,tt_randn,tt_randd, perturbation
 export roundRandOrth, roundRandOrth!
-export roundRandSum, roundRandSum!
+export roundRandOrth2, roundRandOrth2!
+export roundRandSum, roundRandSum2
 export randRound_H_MatVec, randRound_H_MatVec!
 
 include("solvers/ALS.jl")

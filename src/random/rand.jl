@@ -11,7 +11,8 @@
 function Base.randn(N::Int, d::Int, k::Int,
                     row_ranks::OffsetVector{Int, Vector{Int}}, 
                     col_ranks::OffsetVector{Int, Vector{Int}},
-                    ::Type{T}=Float64) where T<:Number
+                    ::Type{T}=Float64; 
+                    orthogonal = :none) where T<:Number
   A = SparseCore{T,N,d}(k)
   @boundscheck A.row_qn == axes(row_ranks, 1)
   @boundscheck A.col_qn == axes(col_ranks, 1)
@@ -40,6 +41,12 @@ function Base.randn(N::Int, d::Int, k::Int,
     A[n,2,n+1] = Block(σ, randn(T,row_ranks[n],col_ranks[n+1]))
     # @show norm(A[n,2,n+1])
   end
+
+  if orthogonal==:left
+    qr!(A)
+  elseif orthogonal==:right
+    lq!(A)
+  end
   return A
 end
 
@@ -55,7 +62,8 @@ end
 function Base.rand(S, N::Int, d::Int, k::Int,
                     row_ranks::OffsetVector{Int, Vector{Int}}, 
                     col_ranks::OffsetVector{Int, Vector{Int}},
-                    ::Type{T}=Float64) where {T<:Number}
+                    ::Type{T}=Float64; 
+                    orthogonal = :none) where {T<:Number}
 
   @assert eltype(S) <: Number
   @assert T == float(eltype(S))
@@ -117,6 +125,12 @@ function Base.rand(S, N::Int, d::Int, k::Int,
     A[n,2,n+1] = Block(a)
     # @show norm(A[n,2,n+1])
   end
+  
+  if orthogonal==:left
+    qr!(A)
+  elseif orthogonal==:right
+    lq!(A)
+  end
   return A
 end
 
@@ -128,7 +142,8 @@ end
 Compute a d-dimensional TT-tensor with ranks `r` and entries drawn uniformly from the indexable collection `S` for the cores.
 """
 function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}},
-                    ::Type{T}=Float64) where {T<:Number,N,d}
+                    ::Type{T}=Float64;
+                    orthogonal=:none) where {T<:Number,N,d}
   @assert eltype(S) <: Number
   @assert T == float(eltype(S))
 
@@ -145,7 +160,7 @@ function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}
     @boundscheck axes(r[d+1],1) == axes(core(tt,d),3)
     tt.r .= r
     for k=1:d
-      C = rand(S, N,d,k,rank(tt,k),rank(tt,k+1))
+      C = rand(S, N,d,k,rank(tt,k),rank(tt,k+1), orthogonal=orthogonal)
       set_core!(tt, C)
     end
 
@@ -155,8 +170,15 @@ function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}
     end
     tt.r[2:d] .= r
     for k=1:d
-      set_core!(tt, rand(S, N,d,k,rank(tt,k),rank(tt,k+1)))
+      set_core!(tt, rand(S, N,d,k,rank(tt,k),rank(tt,k+1), orthogonal=orthogonal))
     end
+  end
+  if orthogonal==:right
+    tt.orthogonal = true
+    tt.corePosition = 1
+  elseif orthogonal==:left
+    tt.orthogonal = true
+    tt.corePosition = d
   end
 
   check(tt)
@@ -169,8 +191,9 @@ end
 
 Compute a d-dimensional TT-tensor with ranks `r` and Gaussian distributed entries for the cores.
 """
-function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64) where {T<:Number,N,d}
-  @boundscheck (length(r) == d+1) || (length(r) == d-1)
+function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64;
+      orthogonal=:none) where {T<:Number,N,d}
+  @boundscheck (length(r) == d+1)
   for k=1:d+1
     @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
   end
@@ -183,7 +206,7 @@ function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, 
     @boundscheck axes(r[d+1],1) == axes(core(tt,d),3)
     tt.r .= r
     for k=1:d
-      C = randn(N,d,k,rank(tt,k),rank(tt,k+1),T)
+      C = randn(N,d,k,rank(tt,k),rank(tt,k+1),T,orthogonal=orthogonal)
       set_core!(tt, C)
     end
 
@@ -193,11 +216,36 @@ function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, 
     end
     tt.r[2:d] .= r
     for k=1:d
-      set_core!(tt, randn(N,d,k,rank(tt,k),rank(tt,k+1),T))
+      set_core!(tt, randn(N,d,k,rank(tt,k),rank(tt,k+1),T,orthogonal=orthogonal))
     end
   end
 
+  if orthogonal==:right
+    tt.orthogonal = true
+    tt.corePosition = 1
+  elseif orthogonal==:left
+    tt.orthogonal = true
+    tt.corePosition = d
+  end
+
   check(tt)
+
+  return tt
+end
+
+"""
+    tt = tt_randd(Val(d), Val(N), r::Int, [T=Float64])
+
+Compute a d-dimensional TT-tensor which is formally the sum of `r` rank-one tensor trains with Gaussian random entries.
+"""
+function tt_randd(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+
+  rank_one = [ [1 for n in occupation_qn(N,d,k)] for k=1:d+1]
+
+  tt = tt_randn(Val(d),Val(N),rank_one,T)
+  for i = 2:r
+    tt += tt_randn(Val(d),Val(N),rank_one,T)
+  end
 
   return tt
 end

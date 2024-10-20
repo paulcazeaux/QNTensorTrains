@@ -1,16 +1,14 @@
 using LinearAlgebra, TimerOutputs
 
 
-function Lanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
-                  tol::Float64 = 1e-4, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
+function Lanczos( H::SparseHamiltonian{T,N,d}, x0::TTvector{T,N,d};
+                  tol::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,N,d}
   to = TimerOutput()
-  reduced || (v = Hamiltonian.reduce(v))
-
 @timeit to "Orthonormalization" begin
   q0, = leftOrthonormalize!!(deepcopy(x0))
 end
 @timeit to "RayleighQuotient" begin
-  α = RayleighQuotient(q0, t, v; reduced=true)
+  α = RayleighQuotient(H, q0)
 end
   Q  = [q0]
   dv = [α ]
@@ -22,7 +20,7 @@ end
 
   # k=1
 @timeit to "MatVec" begin
-  q̃ = H_matvec(q0, t, v) - α*q0
+  q̃ = H_matvec(H, q0) - α*q0
   push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin
@@ -31,7 +29,7 @@ end
   push!(rounded_ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "RayleighQuotient" begin
-  α = RayleighQuotient(q, t, v; reduced=true)
+  α = RayleighQuotient(H, q)
 end
   β = prod(nrm)
 @timeit to "Eigenvalue estimation" begin
@@ -48,7 +46,7 @@ end
     push!(res, β*abs(γ[end]))
 
 @timeit to "MatVec" begin
-    q̃ = H_matvec(Q[end], t, v) - α*Q[end] - β*Q[end-1]
+    q̃ = H_matvec(H, Q[end]) - α*Q[end] - β*Q[end-1]
     push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin
@@ -57,7 +55,7 @@ end
     push!(rounded_ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "RayleighQuotient" begin
-    α = RayleighQuotient(q, t, v; reduced=true)
+    α = RayleighQuotient(H, q)
 end
     β = prod(nrm)
 
@@ -77,24 +75,24 @@ end
   end
   end
 
-  display(to)
 @timeit to "Assemble eigenvector" begin
   w, = leftOrthonormalize!!(roundSum(γ, Q, tol))
 end
+  display(to)
   return λ[end], w, λ, res, ranks, rounded_ranks
 end
 
-function randLanczos( t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d};
+using Graphs, MetaGraphsNext, Plots, GraphRecipes
+function randLanczos( H::SparseHamiltonian{T,N,d}, x0::TTvector{T,N,d};
                   tol::Float64 = 1e-4, rmax=100, over = 5, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
 
   to = TimerOutput()
-  reduced || (v = Hamiltonian.reduce(v))
 
 @timeit to "Orthonormalization" begin
   q0, = leftOrthonormalize!!(deepcopy(x0))
 end
 @timeit to "RayleighQuotient" begin
-  α = RayleighQuotient(q0, t, v; reduced=true)
+  α = RayleighQuotient(H, q0)
 end
   Q  = [q0]
   dv = [α ]
@@ -106,7 +104,8 @@ end
 
   # k=1
 @timeit to "MatVec" begin
-  q̃ = randRound_H_MatVecAdd([1,-α], [q0,q0], t, v, rmax, over)
+  # q̃ = randRound_H_MatVecAdd([1,-α], H, [q0,q0], rmax, over)
+  q̃ = randRound_H_MatVecAdd2([1,-α], H, [q0,q0], rmax+over,to)
   push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin
@@ -115,7 +114,7 @@ end
   push!(rounded_ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "RayleighQuotient" begin
-  α = RayleighQuotient(q, t, v; reduced=true)
+  α = RayleighQuotient(H, q)
 end
   β = prod(nrm)
 @timeit to "Eigenvalue estimation" begin
@@ -132,7 +131,8 @@ end
     push!(res, β*abs(γ[end]))
 
 @timeit to "MatVec" begin
-    q̃ = randRound_H_MatVecAdd([1,-α,-β], [Q[end],Q[end],Q[end-1]], t, v, rmax, over)
+    # q̃ = randRound_H_MatVecAdd([1,-α,-β], H, [Q[end],Q[end],Q[end-1]], rmax, over)
+    q̃ = randRound_H_MatVecAdd2([1,-α,-β], H, [Q[end],Q[end],Q[end-1]], rmax+over,to)
     push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin
@@ -141,7 +141,7 @@ end
     push!(rounded_ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "RayleighQuotient" begin
-    α = RayleighQuotient(q, t, v; reduced=true)
+    α = RayleighQuotient(H, q)
 end
     β = prod(nrm)
 
@@ -151,7 +151,7 @@ end
     γ = F.vectors[:,1]
 end
 
-    @show α, β, β*abs(γ[end])
+    # @show α, β, β*abs(γ[end])
     if β*abs(γ[end]) < tol
       break
     elseif β*abs(γ[end]) > 2minimum(res)
@@ -161,9 +161,10 @@ end
   end
   end
 
-  display(to)
 @timeit to "Assemble eigenvector" begin
-  w, = leftOrthonormalize!!(roundRandSum(γ, Q, rmax, over))
+  # w, = leftOrthonormalize!!(roundRandSum(γ, Q, rmax, over))
+  w, = leftOrthonormalize!!(roundRandSum2(γ, Q, rmax, over))
 end
+  display(to)
   return λ[end], w, λ, res, ranks, rounded_ranks
 end

@@ -4,11 +4,22 @@ authors = ["Paul Cazeaux <cazeaux@vt.edu>"]
 version = "0.1.0"
 
 [deps]
+GraphRecipes = "bd48cda9-67a9-57be-86fa-5b3c104eda73"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MetaGraphsNext = "fa8bd995-216d-47f1-8a91-f3b68fbeb377"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [compat]
+GraphRecipes = "0.5.13"
+Graphs = "1.12.0"
+IterTools = "1.10.0"
+MetaGraphsNext = "0.7.0"
+Plots = "1.40.8"
 julia = "1.9"

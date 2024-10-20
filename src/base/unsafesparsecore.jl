@@ -82,6 +82,16 @@ end
   return start:stop
 end
 
+@propagate_inbounds function LinearAlgebra.lmul!(a::Number, B::UnsafeSparseCore{T,N,d}) where {T<:Number,N,d}
+  for n in axes(B.unoccupied,1)
+    lmul!(T(a), B.unoccupied[n])
+  end
+  for n in axes(B.occupied,1)
+    lmul!(T(a), B.occupied[n])
+  end
+  return B
+end
+
 
 """
   SparseCore(k::Int, row_ranks::OffsetVector{Int, Vector{Int}}, col_ranks::OffsetVector{Int, Vector{Int}}, A::UnsafeSparseCore{T<:Number,N,d})
