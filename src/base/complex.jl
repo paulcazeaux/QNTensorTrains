@@ -5,10 +5,8 @@ Transform a TT-tensor `tt` to its complex conjugate in-place.
 """
 function Base.conj!(core::SparseCore{T,N,d}) where {T<:Number,N,d}
   for l in axes(core,1), r in (l:l+1)∩axes(core,3)
-    if isnonzero(core,l,r)
-      core[l,r].factor = conj(factor(core[l,r]))
-      conj!(data(core[l,r]))
-    end
+    core[l,r].factor = conj(factor(core[l,r]))
+    conj!(data(core[l,r]))
   end
   return core
 end
@@ -21,9 +19,7 @@ Compute the real part of `core`.
 function Base.real(v::SparseCore{T,N,d}) where {T<:Number,N,d}
   w = similar(v)
   for l in axes(v,1), r in (l:l+1)∩axes(v,3)
-    if isnonzero(v,l,r)
-      w[l,r] = real(factor(v[l,r])), real(data(v[l,r]))
-    end
+    w[l,r] = real(factor(v[l,r])), real(data(v[l,r]))
   end
   return w
 end
@@ -36,9 +32,7 @@ Compute the imag part of `core`.
 function Base.imag(v::SparseCore{T,N,d}) where {T<:Number,N,d}
   w = similar(v)
   for l in axes(v,1), r in (l:l+1)∩axes(v,3)
-    if isnonzero(v,l,r)
-      w[l,r] = imag(factor(v[l,r])), imag(data(v[l,r]))
-    end
+    w[l,r] = imag(factor(v[l,r])), imag(data(v[l,r]))
   end
   return w
 end

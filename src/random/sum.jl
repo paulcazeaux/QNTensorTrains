@@ -3,94 +3,46 @@
 
 Truncates the ranks of `tt` with specified ranks `target_r`.
 """
-function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, target_r::Vector{OffsetVector{Int,Vector{Int}}}) where {T1<:Number,T<:Number,N,d}
+function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, target_r::Vector{OffsetVector{Int,Vector{Int}}}) where {T1<:Number,T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck @assert length(α) == length(summands)
   @assert all(target_r[  1][0] == rank(S,  1,0) == 1 for S in summands)
   @assert all(target_r[d+1][N] == rank(S,d+1,N) == 1 for S in summands)
 
-  # Initialize tensor cores for the result
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
+  # Use left-orthogonalized Gaussian or Rademacher randomized cores for framing
+  Ω = tt_randn(Val(d),Val(N),target_r,orthogonal=:left)
 
-  # Use Rademacher randomized cores for framing
-  Ω = tt_rand((-1,1),Val(d),Val(N),target_r,orthogonal=:right)
+  # Initialize tensor cores array for the result
+  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef,d)
 
   # Precompute partial projections W
-  W = [ [zeros(T,0,0) for n in axes(cores[k],3), S in summands] for k=1:d]
-  for (s,S) in enumerate(summands)
-    W[d][N,s] = [T(1);;]
-
-    for k=d-1:-1:1
-      Sₖ₊₁ = core(S,k+1)
-      ωₖ₊₁ = core(Ω,k+1)
-      for l in axes(Sₖ₊₁,1)
-        W[k][l,s] = zeros(T,Sₖ₊₁.row_ranks[l],ωₖ₊₁.row_ranks[l])
-        for r in axes(Sₖ₊₁,3)∩(l:l+1)
-          if isnonzero(Sₖ₊₁,l,r) && isnonzero(ωₖ₊₁,l,r)
-            X = data(Sₖ₊₁[l,r]) * W[k+1][r,s] * adjoint(data(ωₖ₊₁[l,r]))
-            axpy!(factor(Sₖ₊₁[l,r])*conj(factor(ωₖ₊₁[l,r])), X, W[k][l,s])
-          end
-        end
-      end
+  Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
+  for s=1:length(summands)
+    Fᴸ[s,1] = IdFrame(Val(N), Val(d), 1)
+    for k=1:d-1
+      Fᴸ[s,k+1] = (adjoint(core(Ω,k)) * Fᴸ[s,k]) * core(summands[s],k)
     end
   end
 
-  # Start with first core
-  # Initialize ranks and array for C matrices for this step
-  C = [ zeros(T,0,0) for n in axes(cores[1],3), _ in summands]
-  ranks = [ 0 for n in axes(cores[1],3) ]
-
-  for n in axes(cores[1],3)
-    # Implicitly contract the block-diagonal TT-sum core into new basis using frame matrices C and W
-    Y = core(summands[1],1)[n,:vertical] * W[1][n,1]
-    for s in 2:length(summands)
-      mul!(Y, core(summands[s],1)[n,:vertical], W[1][n,s], 1, 1)
+  Fᴿ = [ lmul!(α[s], IdFrame(Val(N), Val(d), d+1)) for s in axes(summands,1)]
+  for k=d:-1:2
+    SₖFᴿ = [ core(summands[s],k) * Fᴿ[s] for s in axes(summands,1)]
+    FᴸSₖFᴿ = Fᴸ[1,k] * SₖFᴿ[1]
+    for s = 2:length(summands)
+      mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
-
-    Q,_,ranks[n] = my_qc!(Y)
-    for (s,S) in enumerate(summands)
-      C[n,s] = α[s] * Q' * core(S,1)[n,:vertical]
-    end
-    cores[1][n,:vertical] = Q
+    Q, = cq!(FᴸSₖFᴿ)
+    Fᴿ = [SₖFᴿ[s] * adjoint(Q) for s in axes(summands,1)]
+    cores[k] = Q
   end
 
-  for k=2:d-1
-
-    for n in axes(cores[k],1)
-      cores[k].row_ranks[n] = ranks[n]
-    end
-
-    # Contract k-th summand cores with C matrices from previous step
-    V = [ C[:,s] * core(S,k) for (s,S) in enumerate(summands)]
-
-    # Initialize ranks and array for C matrices for this step
-    C = [ zeros(T,0,0) for n in axes(cores[k],3), _ in summands]
-    ranks = [ 0 for n in axes(cores[k],3) ]
-
-    for n in axes(cores[k],3)
-      # Implicitly contract the block-diagonal TT-sum core into new basis using frame matrices C and W
-      Y = V[1][n,:vertical] * W[k][n,1]
-      for s in 2:length(V)
-        mul!(Y, V[s][n,:vertical], W[k][n,s], 1, 1)
-      end
-
-      Q,_,ranks[n] = my_qc!(Y)
-      for s in eachindex(V)
-        C[n,s] = Q' * V[s][n,:vertical]
-      end
-      cores[k][n,:vertical] = Q
-    end
-  end
-
-  cores[d] = C[:,1]*core(summands[1],d)
-  for s=2:length(summands)
-    axpy!(1, C[:,s]*core(summands[s],d), cores[d])
+  cores[1] = core(summands[1],1) * Fᴿ[1]
+  for s = 2:length(summands)
+    mul!(cores[1], core(summands[s],1), Fᴿ[s], 1, 1)
   end
 
   tt = cores2tensor(cores)
-
   tt.orthogonal = true
-  tt.corePosition = d
-
+  tt.corePosition = 1
   return tt
 end
 
@@ -99,7 +51,7 @@ end
 
 Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and oversampling `over`.
 """
-function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d}
+function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d,M<:AbstractMatrix}
   target_r = [[min(rmax, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   for k=2:d
     target_r[k] .+= over
@@ -111,9 +63,9 @@ end
 """
   roundRandSum2(α::Vector{Number}, summands::Vector{TTvector{T,N,d}}, m::Int)
 
-Truncates the ranks of `tt` with specified ranks `target_r` using a randomized projection onto `m` vectors.
+Truncates the ranks of `tt` with specified ranks `target_r` using a randomized projection onto `m` rank-one vectors.
 """
-function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, m::Int) where {T1<:Number,T<:Number,N,d}
+function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, m::Int) where {T1<:Number,T<:Number,N,d,M<:AbstractMatrix{T}}
   target_r = [[min(m, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
 
   @boundscheck @assert length(α) == length(summands)
@@ -121,94 +73,39 @@ function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, m::Int
   @assert all(target_r[d+1][N] == rank(S,d+1,N) == 1 for S in summands)
 
   # Initialize tensor cores for the result
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
-
-  Ω = randn(T,d-1,2,m)
+  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef,d)
 
   # Precompute partial projections W
-  W = [ [zeros(T,0,0) for n in axes(cores[k],3), S in summands] for k=1:d]
-  for (s,S) in enumerate(summands)
-    W[d][N,s] = ones(T,1,m)
-
-    for k=d-1:-1:1
-      Sₖ₊₁ = core(S,k+1)
-      for l in axes(Sₖ₊₁,1)
-        W[k][l,s] = zeros(T,Sₖ₊₁.row_ranks[l],m)
-        for r in axes(Sₖ₊₁,3)∩(l:l+1)
-          if isnonzero(Sₖ₊₁,l,r)
-            X = data(Sₖ₊₁[l,r]) * W[k+1][r,s] 
-            for i=1:m
-              X[:,i] .*= Ω[k,r+1-l,i]
-            end
-            axpy!(factor(Sₖ₊₁[l,r]), X, W[k][l,s])
-          end
-        end
-      end
-
-      # Truncate previous projections as needed
-      for n in axes(W[k+1],1)
-        W[k+1][n,s] = W[k+1][n,s][:,1:target_r[k+2][n]]
-      end
+  Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
+  for k=1:d-1
+    Ωₖ = randd(N,d,k,m)
+    for s=1:length(summands)
+      k == 1 && ( Fᴸ[s,1] = IdFrame(Val(N), Val(d), 1) )
+      # Use randomized diagonal cores (i.e. block-TT representation of m rank-one vectors) for projection
+      Fᴸ[s,k+1] = (adjoint(Ωₖ) * Fᴸ[s,k]) * core(summands[s],k)
     end
   end
 
-  # Start with first core
-  # Initialize ranks and array for C matrices for this step
-  C = [ zeros(T,0,0) for n in axes(cores[1],3), _ in summands]
-  ranks = [ 0 for n in axes(cores[1],3) ]
-
-  for n in axes(cores[1],3)
-    # Implicitly contract the block-diagonal TT-sum core into new basis using frame matrices C and W
-    Y = core(summands[1],1)[n,:vertical] * W[1][n,1]
-    for s in 2:length(summands)
-      mul!(Y, core(summands[s],1)[n,:vertical], W[1][n,s], 1, 1)
+  Fᴿ = [ lmul!(α[s], IdFrame(Val(N), Val(d), d+1)) for s in axes(summands,1)]
+  for k=d:-1:2
+    SₖFᴿ = [ core(summands[s],k) * Fᴿ[s] for s in axes(summands,1)]
+    FᴸSₖFᴿ = Fᴸ[1,k] * SₖFᴿ[1]
+    for s = 2:length(summands)
+      mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
-
-    Q,_,ranks[n] = my_qc!(Y)
-    for (s,S) in enumerate(summands)
-      C[n,s] = α[s] * Q' * core(S,1)[n,:vertical]
-    end
-    cores[1][n,:vertical] = Q
+    Q, = cq!(FᴸSₖFᴿ)
+    Fᴿ = [SₖFᴿ[s] * adjoint(Q) for s in axes(summands,1)]
+    cores[k] = Q
   end
 
-  for k=2:d-1
-
-    for n in axes(cores[k],1)
-      cores[k].row_ranks[n] = ranks[n]
-    end
-
-    # Contract k-th summand cores with C matrices from previous step
-    V = [ C[:,s] * core(S,k) for (s,S) in enumerate(summands)]
-
-    # Initialize ranks and array for C matrices for this step
-    C = [ zeros(T,0,0) for n in axes(cores[k],3), _ in summands]
-    ranks = [ 0 for n in axes(cores[k],3) ]
-
-    for n in axes(cores[k],3)
-      # Implicitly contract the block-diagonal TT-sum core into new basis using frame matrices C and W
-      Y = V[1][n,:vertical] * W[k][n,1]
-      for s in 2:length(V)
-        mul!(Y, V[s][n,:vertical], W[k][n,s], 1, 1)
-      end
-
-      Q,_,ranks[n] = my_qc!(Y)
-      for s in eachindex(V)
-        C[n,s] = Q' * V[s][n,:vertical]
-      end
-      cores[k][n,:vertical] = Q
-    end
-  end
-
-  cores[d] = C[:,1]*core(summands[1],d)
-  for s=2:length(summands)
-    axpy!(1, C[:,s]*core(summands[s],d), cores[d])
+  cores[1] = core(summands[1],1) * Fᴿ[1]
+  for s = 2:length(summands)
+    mul!(cores[1], core(summands[s],1), Fᴿ[s], 1, 1)
   end
 
   tt = cores2tensor(cores)
-
   tt.orthogonal = true
-  tt.corePosition = d
-
+  tt.corePosition = 1
   return tt
 end
 
@@ -217,6 +114,6 @@ end
 
 Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and oversampling `over`.
 """
-function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d}
+function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,N,d,M<:AbstractMatrix{T}}
   return round!(roundRandSum2(α,summands,rmax+over), rmax=rmax)
 end

@@ -9,7 +9,7 @@ mutable struct TTtangent{T<:Number,N,d}
 
   baseL::TTvector{T,N,d}
   baseR::TTvector{T,N,d}
-  components::Vector{SparseCore{T,N,d}}
+  components::Vector{SparseCore{T,N,d,Matrix{T}}}
 
   """
       TTtangent(baseL::TTvector{T,N,d}, baseR::TTvector{T,N,d}, direction::TTvector{T,N,d})
@@ -26,61 +26,32 @@ mutable struct TTtangent{T<:Number,N,d}
     @assert baseR.orthogonal && baseR.corePosition == 1
     @assert baseL.orthogonal && baseL.corePosition == d
 
-    r = deepcopy(rank(baseL))
-
     # Compute the left projection matrices: Pi = U^T_{k-1} ... U^T_1 W_1 ... W_{k-1}, a block-diagonal r[k] × rank(direction,k) matrix
-    P = Vector{OffsetVector{Matrix{T},Vector{Matrix{T}}}}(undef, d)
-    P[1] = [n == 0 ? ones(T,1,1) : zeros(T,0,0) for n in axes(core(baseL,1),1)]
+    P = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
+    P[1] = IdFrame(Val(N), Val(d), 1)
     for k=1:d-1
-      Xₖ = core(baseL,k)
-      Dₖ = core(direction,k)
-
-      P[k+1] = [zeros(T,Xₖ.col_ranks[r],Dₖ.col_ranks[r]) for r in axes(Xₖ,3)]
-      for r in axes(Xₖ,3), l in (r-1:r)∩axes(Xₖ,1)
-        if isnonzero(Xₖ,l,r) && isnonzero(Dₖ,l,r)
-          mul!( P[k+1][r], 
-                adjoint(data(Xₖ[l,r])) * P[k][l],
-                data(Dₖ[l,r]),
-                conj(factor(Xₖ[l,r])) * factor(Dₖ[l,r]),
-                T(1)
-              )
-        end
-      end
+      P[k+1] = (adjoint(core(baseL,k)) * P[k]) * core(direction,k)
     end
 
     # Compute the right projection matrices: Q = W_{i+1} ... W_d V^T_d ... V^T_{i+1}, a direction.r[i+1] × r[i+1] matrix
     # Assemble the components of the tangent vector for i=d,...,1
-    Qₖ = [l == N ? ones(T,1,1) : zeros(T,0,0) for l in axes(core(baseR,d),3)]
-    components = Vector{SparseCore{T,N,d}}(undef, d)
-    
-    for k=d:-1:1
-      Xₖ = core(baseR,k)
-      Dₖ = core(direction,k)
+    Qₖ = IdFrame(Val(N), Val(d), d+1)
+    components = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
 
-      tmp = Dₖ * Qₖ
-      components[k] = P[k] * tmp
+    for k=d:-1:1
+      DₖQₖ = core(direction,k) * Qₖ
+      components[k] = P[k] * DₖQₖ
       if k < d
         # Apply gauge condition
         for r in axes(components[k],3)
-          L = Array(core(baseL,k)[r,:vertical])
+          L = core(baseL,k)[r,:vertical]
           components[k][r,:vertical] = (I - L * adjoint(L)) * components[k][r,:vertical]
         end
       end
-
-      Qₖ = [zeros(T,Dₖ.row_ranks[l],Xₖ.row_ranks[l]) for l in axes(Xₖ,1)]
-      for l in axes(Xₖ,1), r in (l:l+1)∩axes(Xₖ,3)
-        if isnonzero(Xₖ,l,r) && isnonzero(tmp,l,r)
-          mul!( Qₖ[l], 
-                data(tmp[l,r]),
-                adjoint(data(Xₖ[l,r])),
-                factor(tmp[l,r]) * conj(factor(Xₖ[l,r])),
-                T(1)
-              )
-        end
-      end
+      Qₖ = DₖQₖ * adjoint(core(baseR,k))
     end
 
-    return new{T,N,d}(r,baseL,baseR,components)
+    return new{T,N,d}(deepcopy(rank(baseL)),baseL,baseR,components)
   end
 end
 
@@ -197,46 +168,29 @@ Compute the TTtensor representation of a tangent vector.
 """
 function TTvector(dx::TTtangent{T,N,d}) where {T<:Number,N,d}
 
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
+  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef,d)
   for k=1:d
-    cores[k].row_ranks .= (k==1 ? 1 : 2 ) .* rank(dx,k)
-    cores[k].col_ranks .= (k==d ? 1 : 2 ) .* rank(dx,k+1)
+    row_ranks = (k==1 ? 1 : 2 ) .* rank(dx,k)
+    col_ranks = (k==d ? 1 : 2 ) .* rank(dx,k+1)
+    cores[k] = SparseCore{T,N,d}(k, row_ranks, col_ranks)
   end
 
   for l in axes(cores[1],1), r in (l:l+1)∩axes(cores[1],3)
-    if isnonzero(component(dx,1),l,r) || isnonzero(core(dx.baseL,1),l,r)
-      X = zeros(T,rank(dx,1,l),2*rank(dx,2,r))
-      X[:, 1:rank(dx,2,r)    ] = component(dx, 1)[l,r]
-      X[:, rank(dx,2,r)+1:end] = core(dx.baseL,1)[l,r]
-    else
-      X = zeros_block(T,rank(dx,1,l),2*rank(dx,2,r))
-    end
-    cores[1][l,r] = X
+    cores[1][l,r][:, 1:rank(dx,2,r)    ] = component(dx, 1)[l,r]
+    cores[1][l,r][:, rank(dx,2,r)+1:end] = core(dx.baseL,1)[l,r]
   end
 
   for k=2:d-1
     for l in axes(cores[k],1), r in (l:l+1)∩axes(cores[k],3)
-      if isnonzero(core(dx.baseR, k),l,r) || isnonzero(component(dx,k),l,r) || isnonzero(core(dx.baseL,k),l,r)
-        X = zeros(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-        X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ] = core(dx.baseR,k)[l,r]
-        X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ] = component(dx, k)[l,r]
-        X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end] = core(dx.baseL,k)[l,r]
-      else
-        X = zeros_block(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-      end
-      cores[k][l,r] = X
+      cores[k][l,r][1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ] = core(dx.baseR,k)[l,r]
+      cores[k][l,r][rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ] = component(dx, k)[l,r]
+      cores[k][l,r][rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end] = core(dx.baseL,k)[l,r]
     end
   end
 
   for l in axes(cores[d],1), r in (l:l+1)∩axes(cores[d],3)
-    if isnonzero(core(dx.baseR,d),l,r) || isnonzero(component(dx,d),l,r)
-      X = zeros(T,2*rank(dx,d,l),rank(dx,d+1,r))
-      X[1:rank(dx,d)[l],    :] = core(dx.baseR,d)[l,r]
-      X[rank(dx,d)[l]+1:end,:] = component(dx, d)[l,r]
-    else
-      X = zeros_block(T,2*rank(dx,d,l),rank(dx,d+1,r))
-    end
-    cores[d][l,r] = X
+    cores[d][l,r][1:rank(dx,d)[l],    :] = core(dx.baseR,d)[l,r]
+    cores[d][l,r][rank(dx,d)[l]+1:end,:] = component(dx, d)[l,r]
   end
 
   return cores2tensor(cores)
@@ -257,47 +211,32 @@ end
 Compute a retraction of `dx.base` + `α`⋅`dx` onto the manifold with ranks 'dx.r' using the HOSVD based rounding.
 """
 function retractHOSVD(dx::TTtangent{T,N,d}, α::Number=one(T)) where {T<:Number,N,d}
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
-  for k=1:d
-    cores[k].row_ranks .= (k==1 ? 1 : 2 ) .* rank(dx,k)
-    cores[k].col_ranks .= (k==d ? 1 : 2 ) .* rank(dx,k+1)
-  end
+  cores = [SparseCore{T,N,d}(
+                  k, 
+                  (k==1 ? 1 : 2 ) .* rank(dx,k), 
+                  (k==d ? 1 : 2 ) .* rank(dx,k+1)
+                            ) for k=1:d]
 
   for l in axes(cores[1],1), r in (l:l+1)∩axes(cores[1],3)
-    if isnonzero(component(dx,1),l,r) || isnonzero(core(dx.baseL,1),l,r)
-      X = zeros(T,rank(dx,1,l),2*rank(dx,2,r))
-      axpy!(α, component(dx, 1)[l,r], @view X[:, 1:rank(dx,2,r)    ])
-      axpy!(1, core(dx.baseL,1)[l,r], @view X[:, rank(dx,2,r)+1:end])
-    else
-      X = zeros_block(T,rank(dx,1,l),2*rank(dx,2,r))
-    end
-    cores[1][l,r] = X
+    X = cores[1][l,r]
+    axpy!(α, component(dx, 1)[l,r], @view X[:, 1:rank(dx,2,r)    ])
+    axpy!(1, core(dx.baseL,1)[l,r], @view X[:, rank(dx,2,r)+1:end])
   end
 
   for k=2:d-1
     for l in axes(cores[k],1), r in (l:l+1)∩axes(cores[k],3)
-      if isnonzero(core(dx.baseR, k),l,r) || isnonzero(component(dx,k),l,r) || isnonzero(core(dx.baseL,k),l,r)
-        X = zeros(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-        axpy!(1, core(dx.baseR,k)[l,r], @view X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ])
-        axpy!(α, component(dx, k)[l,r], @view X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ])
-        axpy!(1, core(dx.baseL,k)[l,r], @view X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end])
-      else
-        X = zeros_block(T,2*rank(dx,k,l),2*rank(dx,k+1,r))
-      end
-      cores[k][l,r] = X
+      X = cores[k][l,r]
+      axpy!(1, core(dx.baseR,k)[l,r], @view X[1:rank(dx,k)[l],    1:rank(dx,k+1)[r]    ])
+      axpy!(α, component(dx, k)[l,r], @view X[rank(dx,k)[l]+1:end,1:rank(dx,k+1)[r]    ])
+      axpy!(1, core(dx.baseL,k)[l,r], @view X[rank(dx,k)[l]+1:end,rank(dx,k+1)[r]+1:end])
     end
   end
 
   for l in axes(cores[d],1), r in (l:l+1)∩axes(cores[d],3)
-    if isnonzero(core(dx.baseR,d),l,r) && isnonzero(component(dx,d),l,r)
-      X = zeros(T,2*rank(dx,d,l),rank(dx,d+1,r))
-      axpy!(1, core(dx.baseR,d)[l,r], @view X[1:rank(dx,d)[l],    :])
-      axpy!(1, core(dx.baseL,d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
-      axpy!(α, component(dx, d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
-    else
-      X = zeros_block(T,2*rank(dx,d,l),rank(dx,d+1,r))
-    end
-    cores[d][l,r] = X
+    X = cores[d][l,r]
+    axpy!(1, core(dx.baseR,d)[l,r], @view X[1:rank(dx,d)[l],    :])
+    axpy!(1, core(dx.baseL,d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
+    axpy!(α, component(dx, d)[l,r], @view X[rank(dx,d)[l]+1:end,:])
   end
 
   return round!(cores2tensor(cores), dx.r) # No chopping.

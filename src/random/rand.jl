@@ -13,11 +13,7 @@ function Base.randn(N::Int, d::Int, k::Int,
                     col_ranks::OffsetVector{Int, Vector{Int}},
                     ::Type{T}=Float64; 
                     orthogonal = :none) where T<:Number
-  A = SparseCore{T,N,d}(k)
-  @boundscheck A.row_qn == axes(row_ranks, 1)
-  @boundscheck A.col_qn == axes(col_ranks, 1)
-  A.row_ranks .= row_ranks
-  A.col_ranks .= col_ranks
+  A = SparseCore{T,N,d}(k, row_ranks, col_ranks)
 
   # (  sum(row_ranks[n]*col_ranks[n  ] for n in axes(A.unoccupied, 1))
   #      + sum(row_ranks[n]*col_ranks[n+1] for n in axes(A.occupied,   1))
@@ -29,7 +25,7 @@ function Base.randn(N::Int, d::Int, k::Int,
     else
       σ = 1
     end
-    A[n,1,n] = Block(σ, randn(T,row_ranks[n],col_ranks[n]))
+    copyto!(A[n,1,n],  σ*randn(T,row_ranks[n],col_ranks[n]))
     # @show norm(A[n,1,n])
   end
   for n in axes(A.occupied, 1)
@@ -38,7 +34,7 @@ function Base.randn(N::Int, d::Int, k::Int,
     else
       σ = 1
     end
-    A[n,2,n+1] = Block(σ, randn(T,row_ranks[n],col_ranks[n+1]))
+    copyto!(A[n,2,n+1], σ*randn(T,row_ranks[n],col_ranks[n+1]))
     # @show norm(A[n,2,n+1])
   end
 
@@ -69,11 +65,7 @@ function Base.rand(S, N::Int, d::Int, k::Int,
   @assert T == float(eltype(S))
 
 
-  A = SparseCore{T,N,d}(k)
-  @boundscheck A.row_qn == axes(row_ranks, 1)
-  @boundscheck A.col_qn == axes(col_ranks, 1)
-  A.row_ranks .= row_ranks
-  A.col_ranks .= col_ranks
+  A = SparseCore{T,N,d}(k, row_ranks, col_ranks)
 
   # (  sum(row_ranks[n]*col_ranks[n  ] for n in axes(A.unoccupied, 1))
   #      + sum(row_ranks[n]*col_ranks[n+1] for n in axes(A.occupied,   1))
@@ -91,7 +83,7 @@ function Base.rand(S, N::Int, d::Int, k::Int,
         a = float(rand(S,row_ranks[n],col_ranks[n]))
       end
     end
-    A[n,1,n] = Block(a)
+    A[n,1,n] = a
     # @show norm(A[n,1,n])
   end
   for n in axes(A.occupied, 1)
@@ -104,16 +96,16 @@ function Base.rand(S, N::Int, d::Int, k::Int,
     r = minimum(size(a))
     if r < 50 # Because the matrix is small, we double check the numerical rank of the sketch matrix
       if n ∈ axes(A.unoccupied, 1) && n+1 ∈ axes(A.unoccupied, 2)
-        while rank(hcat(data(A.unoccupied[n]),a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1]) &&
-              rank(vcat(data(A.unoccupied[n+1]),a)) < min(row_ranks[n]+row_ranks[n+1], col_ranks[n+1])
+        while rank(hcat(A.unoccupied[n],a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1]) &&
+              rank(vcat(A.unoccupied[n+1],a)) < min(row_ranks[n]+row_ranks[n+1], col_ranks[n+1])
           a = float(rand(S,row_ranks[n],col_ranks[n+1]))
         end
       elseif n ∈ axes(A.unoccupied, 1)
-        while rank(hcat(data(A.unoccupied[n]),a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1])
+        while rank(hcat(A.unoccupied[n],a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1])
           a = float(rand(S,row_ranks[n],col_ranks[n+1]))
         end
       elseif n+1 ∈ axes(A.unoccupied, 2)
-        while rank(vcat(data(A.unoccupied[n+1]),a)) < min(row_ranks[n]+row_ranks[n+1],col_ranks[n+1])
+        while rank(vcat(A.unoccupied[n+1],a)) < min(row_ranks[n]+row_ranks[n+1],col_ranks[n+1])
           a = float(rand(S,row_ranks[n],col_ranks[n+1]))
         end
       else
@@ -122,7 +114,7 @@ function Base.rand(S, N::Int, d::Int, k::Int,
         end
       end
     end
-    A[n,2,n+1] = Block(a)
+    A[n,2,n+1] = a
     # @show norm(A[n,2,n+1])
   end
   
@@ -133,7 +125,36 @@ function Base.rand(S, N::Int, d::Int, k::Int,
   end
   return A
 end
+"""
+  A = randd(N::Int, d::Int, k::Int, r::Int,
+                    [T=Float64])
 
+  Compute a core with randomized entries within the sparse block structure allowed
+  for the `k`-th core of a `d`-dimensional TT-tensor with `N` total occupation number,
+  with given ranks `row_ranks` and `col_ranks`.
+"""
+function randd(N::Int, d::Int, k::Int, r::Int, ::Type{T}=Float64) where T<:Number
+  if k == 1
+    Ωₖ = SparseCore{T,N,d}(1, [1 for n in occupation_qn(N,d,1)], [r for n in occupation_qn(N,d,2)])
+    randn!.(Ωₖ.unoccupied)
+    randn!.(Ωₖ.occupied)
+    return Ωₖ
+  elseif k == d
+    Ωₖ = SparseCore{T,N,d}(d, [r for n in occupation_qn(N,d,d)], [1 for n in occupation_qn(N,d,d+1)])
+    randn!.(Ωₖ.unoccupied)
+    randn!.(Ωₖ.occupied)
+    return Ωₖ
+  else # k<d
+    ω₁ = Diagonal(randn(T,r))
+    ω₂ = Diagonal(randn(T,r))
+    row_qn = occupation_qn(N,d,k)
+    col_qn = occupation_qn(N,d,k+1)
+    Ωₖ = SparseCore{T,N,d}(k, 
+                          OffsetVector([ω₁ for l in row_qn∩ col_qn    ], row_qn∩ col_qn    ),
+                          OffsetVector([ω₂ for l in row_qn∩(col_qn.-1)], row_qn∩(col_qn.-1)))
+    return Ωₖ
+  end
+end
 
 
 """
@@ -229,23 +250,6 @@ function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, 
   end
 
   check(tt)
-
-  return tt
-end
-
-"""
-    tt = tt_randd(Val(d), Val(N), r::Int, [T=Float64])
-
-Compute a d-dimensional TT-tensor which is formally the sum of `r` rank-one tensor trains with Gaussian random entries.
-"""
-function tt_randd(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
-
-  rank_one = [ [1 for n in occupation_qn(N,d,k)] for k=1:d+1]
-
-  tt = tt_randn(Val(d),Val(N),rank_one,T)
-  for i = 2:r
-    tt += tt_randn(Val(d),Val(N),rank_one,T)
-  end
 
   return tt
 end

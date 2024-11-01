@@ -119,15 +119,15 @@ println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_
 println()
 
 
-@time e1, ψ1, hist1, res1 = randLanczos(H,ψmf; tol=1e-4, maxIter=20, rmax=50, over=10, reduced=true)
+@time e1, ψ1, _, hist1, res1 = randLanczos(H,ψmf; tol=1e-4, maxIter=20, rmax=50, over=10, reduced=true)
 E1 = E(ψ1)
 display(ψ1)
 @show hist1.+e_nuclear.-e_tot, E1-e_tot
-@time e2, ψ2, hist2, res2 = randLanczos(H,ψ1; tol=1e-6, maxIter=20, rmax=100, over=10, reduced=true)
+@time e2, ψ2, _, hist2, res2 = randLanczos(H,ψ1; tol=1e-6, maxIter=20, rmax=100, over=10, reduced=true)
 E2 = E(ψ2)
 display(ψ2)
 @show hist2.+e_nuclear.-e_tot, E2-e_tot
-@time e3, ψ3, hist3, res3 = randLanczos(H,ψ2; tol=1e-6, maxIter=20, rmax=150, over=10, reduced=true)
+@time e3, ψ3, _, hist3, res3 = randLanczos(H,ψ2; tol=1e-6, maxIter=20, rmax=150, over=10, reduced=true)
 E3 = E(ψ3)
 display(ψ3)
 @show hist3.+e_nuclear.-e_tot, E3-e_tot

@@ -6,25 +6,25 @@ using OffsetArrays
 Implementation of Block Sparse TTvector class and associated core functions.
 Mode sizes are assumed to be all 2 and total quantum number is N.
 """
-mutable struct TTvector{T<:Number,N,d} # <: AbstractArray{T,d}
+mutable struct TTvector{T<:Number,N,d,S<:AbstractMatrix{T}} # <: AbstractArray{T,d}
   r::Vector{OffsetVector{Int,Vector{Int}}}
-  cores::Vector{SparseCore{T,N,d}}
+  cores::Vector{SparseCore{T,N,d,S}}
   orthogonal::Bool
   corePosition::Int
 
   function TTvector(r::Vector{OffsetVector{Int,Vector{Int}}}, 
-                    cores::Vector{SparseCore{T,N,d}}) where {T<:Number,N,d}
+                    cores::Vector{SparseCore{T,N,d,S}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
     @boundscheck begin
       length(cores) == d || throw(DimensionMismatch("Trying to form $d-dimensional tensor train with only $(length(cores)) cores"))
       N ≤ d || throw(DimensionMismatch("Total number of electrons $N cannot be larger than dimension $d"))
     end
     
     for k=1:d
-      @assert typeof(cores[k]) == SparseCore{T,N,d} && cores[k].k == k
+      @assert cores[k].k == k
       @assert cores[k].row_ranks == r[k]
       @assert cores[k].col_ranks == r[k+1]
     end
-    return new{T,N,d}(r,cores,false,0)
+    return new{T,N,d,S}(r,cores,false,0)
   end
 end
 
@@ -92,10 +92,10 @@ end
 Compute the d-dimensional sTT-tensor of all zeros.
 """
 function tt_zeros(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
   r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
   r[1][0] = 1
   r[d+1][N] = 1
+  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
 
   tt = TTvector(r, cores)
   check(tt)
@@ -104,15 +104,36 @@ function tt_zeros(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
 end
 
 function tt_zeros(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
   r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
   r[1][0] = 1
   r[d+1][N] = 1
+  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
 
   tt = TTvector(r, cores)
   check(tt)
 
   return tt
+end
+
+function tt_zeros(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64) where {T<:Number,N,d}
+  @boundscheck (length(r) == d+1) || (length(r) == d-1)
+
+  if length(r) == d+1
+    for k=1:d
+      @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
+    end
+    cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
+
+  else # length(r) == d-1
+    for k=1:d-1
+      @boundscheck axes(r[k],1) == occupation_qn(N,d,k-1)
+    end
+    cores = [SparseCore{T,N,d}(k, k>1 ? r[k-1] : 1, k<d ? r[k] : 1) for k=1:d]
+  end
+  tt = TTvector(r, cores)
+  check(tt)
+
+  return(tt)
 end
 
 """
@@ -121,18 +142,12 @@ end
 Compute the d-dimensional sTT-tensor of all zeros.
 """
 function tt_ones(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
   r = [[1 for n in occupation_qn(N,d,k)] for k=1:d+1]
+  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
 
   for k=1:d
-    cores[k].row_ranks .= 1
-    cores[k].col_ranks .= 1
-    for n in cores[k].row_qn ∩ cores[k].col_qn
-      cores[k].unoccupied[n] = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n])
-    end
-    for n in cores[k].row_qn ∩ (cores[k].col_qn.-1)
-      cores[k].occupied[n]   = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n+1])
-    end
+    fill!.(cores[k].unoccupied, 1)
+    fill!.(cores[k].occupied, 1)
   end
 
   tt = TTvector(r, cores)
@@ -142,18 +157,12 @@ function tt_ones(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
 end
 
 function tt_ones(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
   r = [[1 for n in occupation_qn(N,d,k)] for k=1:d+1]
+  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
 
   for k=1:d
-    cores[k].row_ranks .= 1
-    cores[k].col_ranks .= 1
-    for n in cores[k].row_qn ∩ cores[k].col_qn
-      cores[k].unoccupied[n] = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n])
-    end
-    for n in cores[k].row_qn ∩ (cores[k].col_qn.-1)
-      cores[k].occupied[n]   = T(1), ones(T,cores[k].row_ranks[n],cores[k].col_ranks[n+1])
-    end
+    fill!.(cores[k].unoccupied, 1)
+    fill!.(cores[k].occupied, 1)
   end
 
   tt = TTvector(r, cores)
@@ -195,118 +204,90 @@ end
 
 Create `enlarged_tt` object with new 'dummy' modes. Mode sizes of `enlarged_tt` are equal to `new_n`, and the old modal indices positions should be given in the sorted list `old_vars_pos`.
 """
-function add_non_essential_dims(tt::TTvector{T,N,d}, newd::Int, old_vars_pos::NTuple{d,Int}) where {T<:Number,N,d}
+function add_non_essential_dims(tt::TTvector{T,N,d,Matrix{T}}, newd::Int, old_vars_pos::NTuple{d,Int}) where {T<:Number,N,d}
   @assert issorted(old_vars_pos)
   @assert length(old_vars_pos) == d
   @assert newd ≥ d
 
-  small_tt = deepcopy(tt)
-  enlarged_tt = tt_zeros(newd,N,T)
+  r = [[0 for n in occupation_qn(N,newd,k)] for k=1:newd+1]
+  cores = Vector{SparseCore{T,N,newd,Matrix{T}}}(undef, newd)
 
   # New dimensions corresponding to real ones
   for (k, kk) = enumerate(old_vars_pos)
-    Ck = core(small_tt, k)
+    Ck = core(tt, k)
     rqn = axes(Ck,1)
     cqn = axes(Ck,3)
 
-    Ckk = core(enlarged_tt,kk)
-
     # Compute new tensor ranks
-    enlarged_tt.r[kk  ][rqn] .= small_tt.r[k]
-    enlarged_tt.r[kk+1][cqn] .= small_tt.r[k+1]
+    r[kk  ][rqn] .= tt.r[k]
+    r[kk+1][cqn] .= tt.r[k+1]
 
     # Reconcile tensor ranks with cores
-    Ckk.row_ranks[rqn] .= Ck.row_ranks
-    Ckk.col_ranks[cqn] .= Ck.col_ranks
+    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
 
-    for l in axes(Ckk,1), r ∈ (l:l+1) ∩ axes(Ckk,3)
-      if l ∈ rqn && r ∈ cqn
-        Ckk[l,r] = core(small_tt,k)[l,r]
-      else
-        Ckk[l,r] = zeros_block(T,Ckk.row_ranks[l],Ckk.col_ranks[r])
-      end
+    for l in axes(cores[kk],1) ∩ rqn, r ∈ (l:l+1) ∩ axes(cores[kk],3) ∩ cqn
+      cores[kk][l,r] = core(tt,k)[l,r]
     end
   end
 
   # New dimensions before the first real dimension
-  C1 = core(small_tt,1)
+  C1 = core(tt,1)
   qn = axes(C1,1)
 
   for kk in 1:old_vars_pos[1]-1
-
-    Ckk = core(enlarged_tt,kk)
-
     # Compute new tensor ranks
-    enlarged_tt.r[kk  ][qn] .= deepcopy(C1.row_ranks)
-    enlarged_tt.r[kk+1][qn] .= deepcopy(C1.row_ranks)
+    r[kk  ][qn] .= C1.row_ranks
+    r[kk+1][qn] .= C1.row_ranks
 
     # Reconcile tensor ranks with cores
-    Ckk.row_ranks[qn] .= deepcopy(C1.row_ranks)
-    Ckk.col_ranks[qn] .= deepcopy(C1.row_ranks)
+    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
 
     # Add appropriate cores
-    for l in axes(Ckk,1), r ∈ (l:l+1) ∩ axes(Ckk,3)
-      if l ∈ qn && l == r
-        Ckk[l,r] = Array{T}(I(rank(enlarged_tt,kk,l)))
-      else
-        Ckk[l,r] = zeros_block(T,Ckk.row_ranks[l],Ckk.col_ranks[r])
-      end
+    for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
+      cores[kk][l,l] = Array{T}(I(r[kk][l]))
     end
   end
 
   # New dimensions between real ones
   for k=2:d
-    Ck = core(small_tt, k)
+    Ck = core(tt, k)
     qn = axes(Ck,1)
 
-
     for kk=old_vars_pos[k-1]+1:old_vars_pos[k]-1
-      Ckk = core(enlarged_tt,kk)
 
       # Compute new tensor ranks
-      enlarged_tt.r[kk  ][qn] .= deepcopy(Ck.row_ranks)
-      enlarged_tt.r[kk+1][qn] .= deepcopy(Ck.row_ranks)
+      r[kk  ][qn] .= Ck.row_ranks
+      r[kk+1][qn] .= Ck.row_ranks
 
       # Reconcile tensor ranks with cores
-      Ckk.row_ranks[qn] .= deepcopy(Ck.row_ranks)
-      Ckk.col_ranks[qn] .= deepcopy(Ck.row_ranks)
+      cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
 
       # Add appropriate cores
-      for l in axes(Ckk,1), r ∈ (l:l+1) ∩ axes(Ckk,3)
-        if l ∈ qn && l == r
-          Ckk[l,r] = Array{T}(I(rank(enlarged_tt,kk,l)))
-        else
-          Ckk[l,r] = zeros_block(T,Ckk.row_ranks[l],Ckk.col_ranks[r])
-        end
+      for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
+        cores[kk][l,l] = Array{T}(I(r[kk][l]))
       end
     end
   end
 
   # New dimensions after the last real dimension
-  Cd = core(small_tt,d)
+  Cd = core(tt,d)
   qn = axes(Cd,3)
 
   for kk in old_vars_pos[d]+1:newd
-    Ckk = core(enlarged_tt,kk)
 
     # Compute new tensor ranks
-    enlarged_tt.r[kk  ][qn] .= deepcopy(Ck.col_ranks)
-    enlarged_tt.r[kk+1][qn] .= deepcopy(Ck.col_ranks)
+    r[kk  ][qn] .= deepcopy(Ck.col_ranks)
+    r[kk+1][qn] .= deepcopy(Ck.col_ranks)
 
     # Reconcile tensor ranks with cores
-    Ckk.row_ranks[qn] .= deepcopy(Ck.col_ranks)
-    Ckk.col_ranks[qn] .= deepcopy(Ck.col_ranks)
+    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
 
     # Add appropriate cores
-    for l in axes(Ckk,1), r ∈ (l:l+1) ∩ axes(Ckk,3)
-      if l ∈ qn && l == r
-        Ckk[l,r] = Array{T}(I(rank(enlarged_tt,kk,l)))
-      else
-        Ckk[l,r] = zeros_block(T,Ckk.row_ranks[l],Ckk.col_ranks[r])
-      end
+    for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
+      cores[kk][l,l] = Array{T}(I(rank(enlarged_tt,kk,l)))
     end
   end
-
+  enlarged_tt = TTvector(r, cores)
   check(enlarged_tt)
 
   # Assemble new enlarged TTvector and return it
@@ -319,7 +300,7 @@ end
 Create a TT-tensor view on a list of 3D SparseCores.
 The TT-tensor shares the same underlying data structure with `cores` immediately after the call.
 """
-function cores2tensor(cores::Vector{SparseCore{T,N,d}}) where {T<:Number,N,d}
+function cores2tensor(cores::Vector{SparseCore{T,N,d,S}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
   @assert d == length(cores)
   for k=1:d
     @assert cores[k].k == k
@@ -342,17 +323,30 @@ end
 
 Create a view on the list of SparseCores from `tt`.
 """
-function tensor2cores(tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function tensor2cores(tt::TTvector)
   return tt.cores
 end
 
 
-function core(tt::TTvector{T,N,d}, k::Int) where {T<:Number,N,d}
+function core(tt::TTvector, k::Int)
   return tt.cores[k]
 end
 
 function set_core!(tt::TTvector{T,N,d}, new_core::SparseCore{T,N,d}) where {T<:Number,N,d}
   tt.cores[new_core.k] = new_core
+  return tt
+end
+
+function set_cores!(tt::TTvector{T,N,d,S}, first_core::SparseCore{T,N,d,S}, second_core::SparseCore{T,N,d,S}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+  @boundscheck begin
+    @assert second_core.k == first_core.k+1
+    @assert first_core.col_ranks == second_core.row_ranks
+  end
+  k = first_core.k
+  tt.cores[k  ] = first_core
+  tt.cores[k+1] = second_core
+  tt.r[k+1]     = first_core.col_ranks
+  return tt
 end
 
 """
@@ -386,6 +380,7 @@ function Base.length(::TTvector{T,N,d}) where {T<:Number,N,d}
   return 2^d
 end
 
+
 """
     rank(tt::TTvector{T,N,d}, [ind::Int], [n::Int])
 
@@ -414,6 +409,13 @@ function LinearAlgebra.rank(tt::TTvector{T,N,d}, k::Int, n::Int) where {T<:Numbe
   return tt.r[k][n]
 end
 
+function IdFrame(k::Int, tt::TTvector{T,N,d}) where {T<:Number,N,d}
+  return Frame{T,N,d}(k, [T(1)*I(rank(tt,k)) for k in occupation_qn(N,d,k)])
+end
+
+function IdFrame(::Val{N}, ::Val{d}, k::Int, r::Int=1, ::Type{T}=Float64) where {T<:Number,N,d}
+  return Frame{T,N,d}(k, [T(1)*I(r) for n in occupation_qn(N,d,k)])
+end
 
 """
     Array(tt::TTvector{T,N,d}, [sizes::NTuple{d2,Int}])

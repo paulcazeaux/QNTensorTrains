@@ -22,17 +22,21 @@ function round!(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Union{Int,Vector{I
 
   ep = norm(tt)^2/sqrt(d-1) * ϵ
   for k = d:-1:2
-    U, sval, Vt = svd(core(tt,k), :horizontal)
+    U, sval, Vt = svd_horizontal(core(tt,k))
+    rmul!(U, sval)
     ranks = chop(sval, ep)
     ranks = min.(ranks, rmax[k])
 
+    Xₖ = SparseCore{T,N,d}(k, ranks, rank(tt,k+1))
+    C = Frame{T,N,d}(k, U.row_ranks, ranks)
     for n in axes(core(tt,k),1)
-      r = ranks[n]
-      tt.r[k][n] = r
-      core(tt,k)[n,:horizontal] = Vt[n][1:r,:]
-      U[n] = U[n][:,1:r] * Diagonal(sval[n][1:r])
+      Xₖ[n,:horizontal] = view(Vt[n],1:ranks[n],:)
+      copyto!(C[n], view(U[n],:,1:ranks[n]))
     end
-    rmul!(core(tt,k-1), U)
+
+    set_core!(tt, Xₖ)
+    set_core!(tt, core(tt,k-1) * C)
+    tt.r[k] = ranks
   end
 
   tt.orthogonal = true
@@ -50,30 +54,28 @@ Implements TT-rounding algorithm.
 """
 function round!(tt::TTvector{T,N,d}, ranks::Vector{OffsetVector{Int,Vector{Int}}}) where {T<:Number,N,d}
   @assert length(ranks) == d+1
-  if typeof(ranks) <: Vector{OffsetVector{Int,Vector{Int}}}
-    for k=1:d+1
-      @assert axes(ranks[k],1) == occupation_qn(N,d,k)
-    end
+  for k=1:d+1
+    @assert axes(ranks[k],1) == occupation_qn(N,d,k)
   end
 
   leftOrthogonalize!(tt)
   tt.r = ranks
 
   for k = d:-1:2
-    U, sval, Vt = svd(core(tt,k), :horizontal)
+    U, sval, Vt = svd_horizontal(core(tt,k))
+    rmul!(U, sval)
+
+    Xₖ = SparseCore{T,N,d}(k, ranks[k],ranks[k+1])
+    C = Frame{T,N,d}(k, U.row_ranks, ranks[k])
 
     for n in axes(core(tt,k),1)
-      r = ranks[k][n]
-      if length(sval[n]) < r
-        # Pad with zeros to achieve desired ranks
-        U[n] = hcat(U[n], zeros(T,size(U[n],1),r-size(U[n],2)))
-        sval[n] = vcat(sval[n], zeros(T,r-length(sval[n])))
-        Vt[n] = vcat(Vt[n], zeros(T,r-size(Vt[n],1),size(Vt[n],2)))
-      end
-      core(tt,k)[n,:horizontal] = Vt[n][1:r,:]
-      U[n] = U[n][:,1:r] * Diagonal(sval[n][1:r])
+      Xₖ[n,:horizontal] = view(Vt[n],1:ranks[k][n],:)
+      C[n] = U[n][:,1:ranks[k][n]]
     end
-    rmul!(core(tt,k-1), U)
+
+    set_core!(tt, Xₖ)
+    set_core!(tt, core(tt,k-1) * C)
+    tt.r[k] = ranks[k]
   end
 
   tt.orthogonal = true
@@ -115,35 +117,33 @@ end
 Truncates the ranks of `tt` with specified accuracy ϵ (default 1e-14) and maximal rank rmax.
 Implements TT-rounding algorithm with global chopping strategy.
 """
-function round_global!(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Union{Int,Array{Int,1}} = 0) where {T<:Number,N,d}
+function round_global!(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Int = 0) where {T<:Number,N,d}
 
-  if rmax == 0
-    rmax = [min(2^(k-1), 2^(d+1-k)) for k=1:d+1]
-    if any(rmax .> typemax(Int))
-      @warn "Risk of Int overflow - theoretical maximum rank above $(typemax(Int))"
-      rmax = min.(rmax, typemax(Int))
-    end
-    rmax = convert(Vector{Int}, rmax)
-  elseif length(rmax) == 1
-    sizes = convert(NTuple{d,BigInt}, size(tt))
-    rmax = [min(rmax, 2^(k-1), 2^(d+1-k)) for k=1:d+1]
-    rmax = convert(Vector{Int}, rmax)
+  max_ranks = [min(2^(k-1), 2^(d+1-k)) for k=1:d+1]
+  if rmax > 0
+    max_ranks = [[min(rmax, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
   else
+    max_ranks = [[min(binomial(k-1,n), binomial(d+1-k,N-n))       for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  end
+  return round_global!(tt, max_ranks, ϵ)
+end
+
+function round_global!(tt::TTvector{T,N,d}, rmax::Vector{OffsetVector{Int,Vector{Int}}}, ϵ::Float64=1e-14) where {T<:Number,N,d}
+  @boundscheck begin
     @assert length(rmax) == d+1
+    @assert all(axes(rmax[k],1) == occupation_qn(N,d,k) for k=1:d+1)
   end
 
   svals = svdvals(tt)
-
   ranks = chop(svals, norm(tt)*ϵ)
-  for k=1:d-1
-    for n in axes(ranks[k],1)
-      ranks[k][n] = min(ranks[k][n], rmax[k])
-    end
-    rank(tt,k+1) .= ranks[k]
-  end
 
-  for k=1:d
-    reduce_ranks!(core(tt,k), rank(tt,k), rank(tt,k+1))
+  for k=1:d-1
+    ranks[k] = min.(ranks[k], rmax[k+1])
+    rank(tt,k+1) .= ranks[k]
+    set_core!(tt, reduce_ranks(core(tt,k), rank(tt,k), rank(tt,k+1)))
+  end
+  let k=d
+    set_core!(tt, reduce_ranks(core(tt,k), rank(tt,k), rank(tt,k+1)))
   end
 
   tt.orthogonal = false
@@ -158,10 +158,12 @@ end
 Create an approximation of `tt` with specified accuracy ϵ (default 1e-14) and maximal rank rmax.
 Implements TT-rounding algorithm with global chopping strategy.
 """
-function round_global(tt::TTvector{T,N,d}, ϵ::Float64=1e-14; rmax::Union{Int,Array{Int,1}} = 0) where {T<:Number,N,d}
-  tt1 = deepcopy(tt)
-  round_global!(tt1, ϵ, rmax=rmax)
-  return tt1
+@inline function round_global(tt, ϵ; rmax=0)
+  return round_global!(deepcopy(tt), ϵ, rmax=rmax)
+end
+
+@inline function round_global(tt, rmax, ϵ)
+  return round_global!(deepcopy(tt), rmax, ϵ)
 end
 
 """
@@ -172,18 +174,20 @@ This function modifies the internal state of the TT-tensor by orthogonalizing it
 """
 function LinearAlgebra.svdvals(tt::TTvector{T,N,d}) where {T<:Number,N,d}
 
+  tt1 = deepcopy(tt)
   leftOrthogonalize!(tt)
 
-  svals = [ [T[] for n in axes(core(tt,k), 1)] for k=2:d]
+  svals = Vector{Frame{T,N,d,Diagonal{T,Vector{T}}}}(undef, d-1)
   for k = d:-1:2
-    U, S = svd!(core(tt,k), :horizontal)
-
-    svals[k-1] .= S
-    rmul!(core(tt,k-1), U.*Diagonal.(S))
+    U, S, Cₖ = svd_horizontal!(core(tt,k))
+    rmul!(U,S)
+    svals[k-1] = S
+    set_cores!(tt, core(tt,k-1) * U, Cₖ)
   end
 
   tt.orthogonal = true
   tt.corePosition = 1
+
   return svals
 end
 
@@ -198,7 +202,7 @@ Return `R` triangular matrix for the block case, when trailing ranks `r[1]` or `
   * `:RL` for right-left orthogonalization.
 """
 function LinearAlgebra.qr(tt::TTvector{T,N,d}, op::Symbol) where {T<:Number,N,d}
-  tt1 = deepcopy(tt)
+  tt1 = copy(tt)
   R = qr!(tt1, op)
   return tt1, R
 end
@@ -229,8 +233,9 @@ function step_core_right!(tt::TTvector{T,N,d}, k::Int; keepRank::Bool=false) whe
     R = qr!(core(tt,k))
     lmul!(R, core(tt,k+1))
   else
-    C, ranks = qc!(core(tt,k))
-    lmul!(C, core(tt,k+1))
+    Qk, C, ranks = qc!(core(tt,k))
+    set_core!(tt, Qk)
+    set_core!(tt, C * core(tt,k+1))
     tt.r[k+1] = ranks
   end
 
@@ -247,8 +252,9 @@ function step_core_left!(tt::TTvector{T,N,d}, k::Int; keepRank::Bool=false) wher
     L = lq!(core(tt,k))
     rmul!(core(tt,k-1), L)
   else
-    C, ranks = cq!(core(tt,k))
-    rmul!(core(tt,k-1), C)
+    Qk, C, ranks = cq!(core(tt,k))
+    set_core!(tt, Qk)
+    set_core!(tt, core(tt,k-1) * C)
     tt.r[k] .= ranks
   end
   

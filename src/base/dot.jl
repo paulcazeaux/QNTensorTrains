@@ -16,32 +16,38 @@ function LinearAlgebra.dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; orthogona
     rightOrthogonalize!(tt2)
   end
 
-  qn = OffsetArrays.IdOffsetRange(values=0:N, indices=0:N)
-
   if rank(tt1,d+1,N)==rank(tt2,d+1,N)==1
-    p = [n == N ? ones(T,1,1) : zeros(T,0,0) for n in qn]
 
-    for k=d:-1:1
-      for l in axes(core(tt1,k),1)
-        Pl = zeros(T, rank(tt1,k,l), rank(tt2,k,l))
-        for r in axes(core(tt1,k),3)∩(l:l+1)
-          A = core(tt1,k)[l,r]
-          B = core(tt2,k)[l,r]
-          if isnonzero(A) && isnonzero(B)
-            C = data(A) * p[r] * adjoint(data(B))
-            c = factor(A) * conj(factor(B))
-            @. Pl += c * C
-          end
-        end
-        p[l] = Pl
-      end
-    end
+  p = IdFrame(Val(N), Val(d), d+1)
+  for k=d:-1:1
+    p = (core(tt2,k) * p) * adjoint(core(tt1,k))
+  end
+  if rank(tt1,1,0)==rank(tt2,1,0)==1
+    return p[0][1,1]
+  else
+    return p[0]
+  end
 
-    if rank(tt1,1,0)==rank(tt2,1,0)==1
-      return p[0][1]
-    else
-      return p[0]
-    end
+    # p = [n == N ? ones(T,1,1) : zeros(T,0,0) for n in qn]
+
+    # for k=d:-1:1
+    #   for l in axes(core(tt1,k),1)
+    #     Pl = zeros(T, rank(tt1,k,l), rank(tt2,k,l))
+    #     for r in axes(core(tt1,k),3)∩(l:l+1)
+    #       A = core(tt1,k)[l,r]
+    #       B = core(tt2,k)[l,r]
+    #       C = A * p[r] * adjoint(B)
+    #       @. Pl += c * C
+    #     end
+    #     p[l] = Pl
+    #   end
+    # end
+
+    # if rank(tt1,1,0)==rank(tt2,1,0)==1
+    #   return p[0][1]
+    # else
+    #   return p[0]
+    # end
   else
     p = [ (n == N ? reshape( I(rank(tt1,d+1,N)*rank(tt2,d+1,N)), 
                            (rank(tt1,d+1,N), rank(tt2,d+1,N), rank(tt1,d+1,N), rank(tt2,d+1,N)) )
@@ -53,11 +59,8 @@ function LinearAlgebra.dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; orthogona
         for r in axes(core(tt1,k),3)∩(l:l+1)
           A = core(tt1,k)[l,r]
           B = core(tt2,k)[l,r]
-          if isnonzero(A) && isnonzero(B)
-            C = data(A) * reshape( reshape(p[r], (:,rank(tt2,k+1,r))) * adjoint(data(B)), (rank(tt1,k+1,r),:))
-            c = factor(A) * conj(factor(B))
-            @. Pl += c * C
-          end
+          C = A * reshape( reshape(p[r], (:,rank(tt2,k+1,r))) * adjoint(B), (rank(tt1,k+1,r),:))
+          @. Pl += c * C
         end
         p[l] = reshape(Pl, (rank(tt1,k,l),rank(tt2,d+1,N), rank(tt1,d+1,N),rank(tt2,k,l)))
       end
@@ -70,38 +73,6 @@ function LinearAlgebra.dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; orthogona
       return p
     end
   end
-end
-
-
-"""
-    dot2(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d})
-
-Computes the 'scalar product' of (non-block) `tt1` and `tt2` as a product of norms, returns a `d`-dimensional array of numbers
-"""
-function dot2(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}) where {T<:Number,N,d}
-  @boundscheck @assert tt1.r[1] == tt1.r[2] == tt1.r[d+1] == tt1.r[d+1] == 1
-  r1 = tt1.r
-  r2 = tt2.r
-  nrm=[[T(0) for l in axes(cores(tt1,k),1)] for k=1:d]
-
-  p = [n == N ? ones(T,1,1) : zeros(T,0,0) for n in qn]
-
-  for k=d:-1:1
-    for l in axes(core(tt1,k),1)
-      Pl = zeros(T, rank(tt1,k,l), rank(tt2,k,l))
-      for r in axes(core(tt1,k),3)∩(l:l+1)
-        A = core(tt1,k)[l,r]
-        B = core(tt2,k)[l,r]
-        C = A.array * p[r] * adjoint(B.array)
-        @. Pl += A.factor * conj(B.factor) * C
-      end
-      p[l] = Pl
-      nrm[k][l] = norm(p[l])
-      p[l] ./ nrm[k][l]
-    end
-  end
-
-  return nrm
 end
 
 function step_core_left_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false) where {T<:Number,N,d}
@@ -117,14 +88,15 @@ function step_core_left_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false
     end
     rmul!(core(tt,k-1), L)
   else
-    C, ranks = cq!(core(tt,k))
-    nrm = norm(norm.(C))
+    Qk, C, ranks = cq!(core(tt,k))
+    nrm = norm(C)
     if nrm != zero(T)
       for n in axes(core(tt,k),1)
         C[n] ./= nrm
       end
     end
-    rmul!(core(tt,k-1), C)
+    set_core!(tt, Qk)
+    set_core!(tt, core(tt,k-1) * C)
     tt.r[k] = ranks
   end
   
@@ -148,14 +120,15 @@ function step_core_right_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=fals
     end
     lmul!(R, core(tt,k+1))
   else
-    C, ranks = qc!(core(tt,k))
-    nrm = norm(norm.(C))
+    Qk, C, ranks = qc!(core(tt,k))
+    nrm = norm(C)
     if nrm != zero(T)
       for n in axes(core(tt,k),3)
         C[n] ./= nrm
       end
     end
-    lmul!(C, core(tt,k+1))
+    set_core!(tt, Qk)
+    set_core!(tt, C * core(tt,k+1))
     tt.r[k+1] = ranks
   end
 

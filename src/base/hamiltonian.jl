@@ -1,8 +1,9 @@
 module Hamiltonian
-using ..QNTensorTrains: SparseCore, UnsafeSparseCore, TTvector, core, cores2tensor, Id_view, S_view, Adag_view, A_view, AdagA_view, factor, data, isnonzero
+using ..QNTensorTrains: Frame, IdFrame, SparseCore, AdjointSparseCore, UnsafeSparseCore, TTvector
+using ..QNTensorTrains: site, core, cores2tensor, Id_view, S_view, Adag_view, A_view, AdagA_view
 using LinearAlgebra, OffsetArrays
 
-export SparseHamiltonian, H_matvec_core, H_matvec, RayleighQuotient, xᵀHy
+export SparseHamiltonian, H_matvec_core, RayleighQuotient, xᵀHy
 
 const Ts = Tuple{NTuple{3,Int64},Union{Int64, NTuple{2,Int64}}}
 
@@ -19,7 +20,7 @@ function reduce(v::Array{T,4}; tol=16eps(real(T))) where {T<:Number}
 
   return v_reduced
 end
-
+ 
 function shift_ranks(ranks::AbstractVector{Int}, 
                       flux::Int, nl::Int, nr::Int, N::Int)
   @boundscheck length(ranks) ≥ flux 
@@ -104,14 +105,7 @@ struct SparseHamiltonian{T<:Number,N,d}
   function ×(α::Number, op::Function)
     αop = (A, flux, nl, nr) -> begin
       B, s... = op(A,flux,nl,nr)
-      C = similar(B)
-      for l in axes(B.unoccupied,1)
-        C.unoccupied[l] = lmul!(α,copy(B.unoccupied[l]))
-      end
-      for l in axes(B.occupied,1)
-        C.occupied[l] = lmul!(α,copy(B.occupied[l]))
-      end
-      return C, s...
+      return lmul!(α,B), s...
     end
 
     return αop
@@ -295,10 +289,10 @@ function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ψ::TTvector{T,N,d}; ϵ=
 end
 
 """
-  `H_matvec_core(core::SparseCore{T,N,d}, t::Matrix{T}, v::Array{T,4})`
+  `H_matvec_core(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d})`
 
 Core function for the matrix-free application of two-body Hamiltonian operators,
-implementing the action on a given TT `core`.
+implementing the action on a given TT `x`.
 The Hamiltonian is given in terms of one-electron integrals `t_{ij}` and two-electron integrals `v_{ijkl}`.
 
 In particular, the two-electron integrals are assumed to be given in physicists' notation and *reduced format* that is,
@@ -308,8 +302,8 @@ where `<ij|kl> = ∫∫ ψ†_i(x₁) ψ†_j(x₂) 1/|x₁-x₂| ψ_k(x₁) ψ_
 Returns a tuple containing a sparse representation of the resulting core:
 block ranks, block row and column index ranges and views into block data.
 """
-function H_matvec_core(H::SparseHamiltonian{T,N,d}, core::SparseCore{T,N,d}) where {T<:Number,N,d}
-  n = core.k
+function H_matvec_core(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
+  n = x.k
   row_states = H.states[n]
   col_states = H.states[n+1]
   blocks     = H.blocks[n]
@@ -318,8 +312,8 @@ function H_matvec_core(H::SparseHamiltonian{T,N,d}, core::SparseCore{T,N,d}) whe
   ###                       Precompute ranks and block structure ranges                          ###
   ##################################################################################################
 
-  HC = ( similar(core.row_ranks), 
-         similar(core.col_ranks), 
+  HC = ( similar(x.row_ranks), 
+         similar(x.col_ranks), 
          Vector{OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}}(undef, length(blocks)), 
          Vector{OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}}(undef, length(blocks)), 
          Vector{UnsafeSparseCore{T,N,d}}(undef, length(blocks))
@@ -327,24 +321,24 @@ function H_matvec_core(H::SparseHamiltonian{T,N,d}, core::SparseCore{T,N,d}) whe
 
   rowsize = length(row_states)
   colsize = length(col_states)
-  blockrow_starts = [1 for i=1:rowsize, ql in axes(core, 1)]
-  blockrow_ends   = [0 for i=1:rowsize, ql in axes(core, 1)]
-  blockcol_starts = [1 for i=1:colsize, ql in axes(core, 3)]
-  blockcol_ends   = [0 for i=1:colsize, ql in axes(core, 3)]
+  blockrow_starts = [1 for i=1:rowsize, ql in axes(x, 1)]
+  blockrow_ends   = [0 for i=1:rowsize, ql in axes(x, 1)]
+  blockcol_starts = [1 for i=1:colsize, ql in axes(x, 3)]
+  blockcol_ends   = [0 for i=1:colsize, ql in axes(x, 3)]
 
   row_ranks = HC[1]
   col_ranks = HC[2]
 
-  if n == 1 # First core is special; stacking horizontally (row rank should be same as `core`)
+  if n == 1 # First core is special; stacking horizontally (row rank should be same as `x`)
     for (i, state) in enumerate(row_states)
-      blockrow_ends[i,:] = shift_ranks(core.row_ranks, first(state)..., N) 
-        # should be filled with zeros and core.row_ranks[0] (usually 1)'s
+      blockrow_ends[i,:] = shift_ranks(x.row_ranks, first(state)..., N) 
+        # should be filled with zeros and x.row_ranks[0] (usually 1)'s
     end
-    row_ranks .= core.row_ranks
+    row_ranks .= x.row_ranks
   else # n > 1
-    starts = [1 for ql in axes(core, 1)]
+    starts = [1 for ql in axes(x, 1)]
     for (i, (s,idx)) in enumerate(row_states)
-      R = shift_ranks(core.row_ranks, s..., N)
+      R = shift_ranks(x.row_ranks, s..., N)
       blockrow_starts[i,:] = starts
       blockrow_ends[  i,:] = starts .+ R .- 1
       starts .+= R
@@ -353,39 +347,39 @@ function H_matvec_core(H::SparseHamiltonian{T,N,d}, core::SparseCore{T,N,d}) whe
   end
 
   if n<d
-    starts = [1 for ql in axes(core, 3)]
+    starts = [1 for ql in axes(x, 3)]
     for (i, (s,idx)) in enumerate(col_states)
-      R = shift_ranks(core.col_ranks, s..., N)
+      R = shift_ranks(x.col_ranks, s..., N)
       blockcol_starts[i,:] .= starts
       blockcol_ends[  i,:] .= starts .+ R .- 1
       starts .+= R
     end
     col_ranks .= blockcol_ends[end,:]
-  else # n == d # Last core: stacking vertically (column rank should be same as `core`)
+  else # n == d # Last core: stacking vertically (column rank should be same as `x`)
     for  (i,(s,idx)) in enumerate(col_states)
-      blockcol_ends[i,:] .= shift_ranks(core.col_ranks, s..., N)
-        # should be filled with zeros and core.col_ranks[N] (usually 1)'s
+      blockcol_ends[i,:] .= shift_ranks(x.col_ranks, s..., N)
+        # should be filled with zeros and x.col_ranks[N] (usually 1)'s
     end
-    col_ranks .= core.col_ranks
+    col_ranks .= x.col_ranks
   end
 
   blockrow_ranges = Dict{ Ts, 
                           OffsetArrays.OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}
                         }(
-    v => [ blockrow_starts[i,l]:blockrow_ends[i,l] for l in axes(core,1)] 
+    v => [ blockrow_starts[i,l]:blockrow_ends[i,l] for l in axes(x,1)] 
     for (i, v) in enumerate(row_states)
                         )
   blockcol_ranges = Dict{ Ts, 
                           OffsetArrays.OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}
                         }(
-    v => [ blockcol_starts[i,l]:blockcol_ends[i,l] for l in axes(core,3)] 
+    v => [ blockcol_starts[i,l]:blockcol_ends[i,l] for l in axes(x,3)] 
     for (i, v) in enumerate(col_states) 
                         )
 
   ##########################################################################################################################################
 
   for (j, ( ((s₁,idx₁),(s₂,idx₂)), op ) ) in enumerate(blocks)
-    OpC, colstate... = op(core, s₁...)
+    OpC, colstate... = op(x, s₁...)
     @boundscheck @assert colstate == s₂
     HC[3][j] = blockrow_ranges[(s₁,idx₁)]
     HC[4][j] = blockcol_ranges[(s₂,idx₂)]
@@ -395,131 +389,117 @@ function H_matvec_core(H::SparseHamiltonian{T,N,d}, core::SparseCore{T,N,d}) whe
   return HC
 end
 
-function H_matvec(H::SparseHamiltonian{T,N,d}, tt_in::TTvector{T,N,d}) where {T<:Number,N,d}
-  cores = [SparseCore{T,N,d}(k) for k=1:d]
+function Base.:*(Fᴸ::Frame{T,N,d,M}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  Hx = H_matvec_core(H, x)
+  @boundscheck begin
+    @assert site(Fᴸ) == site(x)
+    @assert Fᴸ.col_ranks == Hx[1]
+  end
+  y = SparseCore{T,N,d}(x.k, Fᴸ.row_ranks, Hx[2])
+  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
+    mul!(y[:,J], Fᴸ[:,I], v, 1, 1)
+  end
+  return y
+end
 
-  for n=1:d
-    sC = H_matvec_core(H, core(tt_in,n))
+function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, Fᴿ::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  Hx = H_matvec_core(H, x)
+  @boundscheck begin
+    @assert site(Fᴿ) == site(x)+1
+    @assert Fᴿ.row_ranks == Hx[2]
+  end
+  y = SparseCore{T,N,d}(x.k, Hx[1], Fᴿ.col_ranks)
+  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
+    mul!(y[I,:], v, Fᴿ[J,:], 1, 1)
+  end
+  return y
+end
 
-    C = cores[n]
-    C.row_ranks .= sC[1]
-    C.col_ranks .= sC[2]
 
-    for l in axes(C,1), r in (l:l+1) ∩ axes(C,3)
-      X = zeros(T, C.row_ranks[l], C.col_ranks[r])
-      for (I,J,v) in zip(sC[3:5]...)
-        if isnonzero(v,l,r)
-          X[I[l], J[r]] .= v[l,r]
-        end
-      end
-      C[l,r] = X
+function Base.:*(l::AdjointSparseCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
+  Hx = H_matvec_core(H, x)
+  @boundscheck begin
+    @assert site(l) == site(x)
+    @assert parent(l).row_ranks == Hx[1]
+  end
+  y = Frame{T,N,d}(x.k+1, parent(l).col_ranks, Hx[2])
+  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
+    mul!(y[:,J], l[:,I], v, 1, 1)
+  end
+  return y
+end
+
+function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointSparseCore{T,N,d}) where {T<:Number,N,d}
+  Hx = H_matvec_core(H, x)
+  @boundscheck begin
+    @assert site(r) == site(x)
+    @assert parent(r).col_ranks == Hx[2]
+  end
+  y = Frame{T,N,d}(x.k, Hx[1], parent(r).row_ranks)
+  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
+    mul!(y[I,:], v, r[J,:], 1, 1)
+  end
+  return y
+end
+
+function Base.:*(H::SparseHamiltonian{T,N,d}, X::TTvector{T,N,d}) where {T<:Number,N,d}
+  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
+
+  for k=1:d
+    Hxₖ = H_matvec_core(H, core(X,k))
+    cores[k] = SparseCore{T,N,d}(k, Hxₖ[1], Hxₖ[2])
+    for (I,J,v) in zip(Hxₖ[3],Hxₖ[4],Hxₖ[5])
+      copyto!(cores[k][I,J], v)
     end
   end
 
   return cores2tensor(cores)
 end
 
-function RayleighQuotient(H::SparseHamiltonian{T,N,d}, tt_in::TTvector{T,N,d}; orthogonalize::Bool=false) where {T<:Number,N,d}
+function RayleighQuotient(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}; orthogonalize::Bool=false) where {T<:Number,N,d}
 
 # to = TimerOutput()
 # @timeit to "Orthogonalize" begin
   if (orthogonalize)
-    rightOrthogonalize!(tt_in)
+    leftOrthogonalize!(x)
   end
 # end
 
-# @timeit to "Create p" begin
-  p = OffsetVector([n == N ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
+# @timeit to "Frame 1" begin
+  p = IdFrame(Val(N), Val(d), 1)
 # end
 # @timeit to "Contractions" begin
-  for k=d:-1:1
-# @timeit to "Create Xₖ" begin
-    Xₖ = core(tt_in,k)
-# end
-# @timeit to "Compute HXₖ" begin
-    HXₖ = H_matvec_core(H, Xₖ)
-# end
-    for l in axes(Xₖ,1)
-# @timeit to "Create Pl" begin
-      Pl = zeros(T, HXₖ[1][l], Xₖ.row_ranks[l])
-# end
-      for r in axes(Xₖ,3) ∩ (l:l+1)
-        if isnonzero(Xₖ,l,r)
-# @timeit to "Create Vp" begin
-          Vp = zeros(T, HXₖ[1][l], Xₖ.col_ranks[r])
-# end
-# @timeit to "mul! loop" begin
-          for (I,J,v) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
-            if isnonzero(v,l,r)
-              mul!( view(Vp, I[l], :), data(v[l,r]), view(p[r],J[r],:),
-                    factor(v[l,r]), T(1)
-                  )
-            end
-          end
-          mul!(Pl, Vp, adjoint(data(Xₖ[l,r])), conj(factor(Xₖ[l,r])), T(1))
-# end
-        end
-      end
-      p[l] = Pl
-    end
+  for k=1:d
+    p = adjoint(core(x,k)) * (p*H*core(x,k))
   end
-
 # end
 # display(to)
 
-  return p[0][1]
+  return p[N][1]
 end
 
-using TimerOutputs
+# using TimerOutputs
 function xᵀHy(x::TTvector{T,N,d}, H::SparseHamiltonian{T,N,d}, y::TTvector{T,N,d}; orthogonalize::Bool=false) where {T<:Number,N,d}
 
-to = TimerOutput()
-@timeit to "Orthogonalize" begin
+# to = TimerOutput()
+# @timeit to "Orthogonalize" begin
   if (orthogonalize)
-    rightOrthogonalize!(x)
-    rightOrthogonalize!(y)
+    leftOrthogonalize!(x)
+    leftOrthogonalize!(y)
   end
-end
-@timeit to "Create p" begin
-  p = OffsetVector([n == N ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
-end
+# end
 
-@timeit to "Contractions" begin
-  for k=d:-1:1
-@timeit to "Create Xₖ" begin
-    Xₖ = core(x,k)
-end
-@timeit to "Compute HXₖ" begin
-    HYₖ = H_matvec_core(H, core(y,k))
-end
-    for l in axes(Xₖ,1)
-@timeit to "Create Pl" begin
-      Pl = zeros(T, HYₖ[1][l], Xₖ.row_ranks[l])
-end
-      for r in axes(Xₖ,3) ∩ (l:l+1)
-        if isnonzero(Xₖ,l,r)
-@timeit to "Create Vp" begin
-          Vp = zeros(T, HYₖ[1][l], Xₖ.col_ranks[r])
-end
-@timeit to "mul! loop" begin
-          for (I,J,V) in zip(HYₖ[3],HYₖ[4],HYₖ[5])
-            if isnonzero(V,l,r)
-              mul!( view(Vp, I[l], :), data(V[l,r]), view(p[r],J[r],:),
-                    factor(V[l,r]), T(1)
-                  )
-            end
-          end
-          mul!(Pl, Vp, adjoint(data(Xₖ[l,r])), conj(factor(Xₖ[l,r])), T(1))
-end
-        end
-      end
-      p[l] = Pl
-    end
+# @timeit to "Frame 1" begin
+  p = IdFrame(Val(N), Val(d), 1)
+# end
+# @timeit to "Contractions" begin
+  for k=1:d
+    p = adjoint(core(x,k)) * (p*H*core(y,k))
   end
-end
-display(to)
+# end
+# display(to)
 
-  return p[0][1]
+  return p[N][1]
 end
 
 

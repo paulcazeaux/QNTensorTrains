@@ -83,7 +83,7 @@ end
 
 Computes the sum of vectors `summands` with coefficients `α`, rounding the result with precision `ϵ`.
 """
-function roundSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d}}, tol::Float64) where {T1<:Number,T<:Number,N,d}
+function roundSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d,S}}, tol::Float64) where {T1<:Number,T<:Number,N,d,S<:AbstractMatrix{T}}
   if length(summands) == 1
     return round!(α[1] * summands[1], tol)
   elseif length(summands) == 2

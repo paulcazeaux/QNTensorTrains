@@ -8,24 +8,21 @@ H = Σ t_ij a†_i a_j + Σ v_ijkl a†_i a†_j a_k a_l
 The algorithm adapts ranks: the result will not necessarily have the
 same ranks as the initial guess `x0`.
 """
-function MALS(t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d}, ε::Float64 = 1e-4, maxIter::Int = 20; reduced::Bool=false) where {T<:Number,N,d}
-  @boundscheck @assert size(t) == (d,d) && size(v) == (d,d,d,d)
-
+function MALS(H::SparseHamiltonian{T,N,d},x0::TTvector{T,N,d}, ε::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,N,d}
   x = deepcopy(x0)
-  λ, x = MALS!(t,v,x,ε,maxIter)
+  λ, x = MALS!(H,x,ε,maxIter)
 
   return λ, x
 end
 
-function MALS!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Float64, maxIter::Int; reduced::Bool=false) where {T<:Number,N,d}
-  reduced || (v = Hamiltonian.reduce(v))
+function MALS!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, maxIter::Int) where {T<:Number,N,d}
   # Right-orthogonalize the tensor x if necessary
   x.corePosition == 1 || rightOrthogonalize!(x, keepRank=true) 
 
-  λ = RayleighQuotient(x,t,v)
+  λ = RayleighQuotient(H,x)
   for it in 1:maxIter
-    _ = MALSForwardSweep!(t,v,x,ε)
-    λn = MALSBackSweep!(t,v,x,ε)
+    _ = MALSForwardSweep!(H,x,ε)
+    λn = MALSBackSweep!(H,x,ε)
     r = abs(λ-λn)/abs(λn)
     λ = λn
     r < ε && break
@@ -35,10 +32,10 @@ function MALS!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Float64, max
 end
 
 
-function MALSForwardSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
+function MALSForwardSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
   move_core!(x, 1; keepRank=true) # Right-orthogonalize the tensor x
-  Wᴿ = RightToLeftFraming(t,v,x)
-  Wᴸ = OffsetVector([n == 0 ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
+  Fᴿ = RightToLeftFraming(H,x)
+  Fᴸ = IdFrame(Val(N), Val(d), 1)
 
   λ = T(0)
   ep = ε/sqrt(d-1)
@@ -47,31 +44,33 @@ function MALSForwardSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::
     @boundscheck @assert x.corePosition == k
     # Compute new cores.
     vals, vecs, info = KrylovKit.eigsolve(
-                          core_pair -> FramedHamiltonian(core_pair,t,v,Wᴸ,Wᴿ[k+1]), 
+                          core_pair -> FramedHamiltonian(H, core_pair,Fᴸ,Fᴿ[k+1]), 
                           contract(x.cores[k],x.cores[k+1]), 1, :SR;
                           krylovdim=5,
                           issymmetric=true, tol=inner_tol, verbosity=0)
 
     λ = vals[1]
-    S = factor_svd!(x.cores[k],x.cores[k+1],vecs[1], ep)
-    lmul!(Diagonal.(S),x.cores[k+1]) 
+    Xₖ, S, Xₖ₊₁ = factor_svd!(vecs[1], ep)
+    lmul!(S,Xₖ₊₁) 
+    set_core!(x, Xₖ)
+    set_core!(x, Xₖ₊₁)
     rank(x,k+1) .= x.cores[k].col_ranks
 
     x.corePosition = k+1
     if k < d-1 
-      # Compute the new left frame matrix Wᴸ
-      Wᴸ = FramingStepRight(t,v,x,k,Wᴸ)
+      # Compute the new left frame matrix Fᴸ
+      Fᴸ = FramingStepRight(H,x,Fᴸ)
     end
   end
 
   return λ
 end
 
-function MALSBackSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
+function MALSBackSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
   move_core!(x, d-1; keepRank=false) # Right-orthogonalize the tensor x
-  Wᴸ = LeftToRightFraming(t,v,x)
-  Wᴿ = OffsetVector([n == N ? ones(T,1,1) : zeros(T,0,0) for n in 0:N], 0:N)
-  Wᴿ = FramingStepLeft(t,v,x,d,Wᴿ)
+  Fᴸ = LeftToRightFraming(H,x)
+  Fᴿ = IdFrame(Val(N), Val(d), d+1)
+  Fᴿ = FramingStepLeft(H,x,Fᴿ)
 
   λ = T(0)
   ep = ε/sqrt(d-1)
@@ -81,20 +80,22 @@ function MALSBackSweep!(t::Matrix{T}, v::Array{T,4}, x::TTvector{T,N,d}, ε::Flo
 
     # Compute new cores.
     vals, vecs, info = KrylovKit.eigsolve(
-                          core_pair -> FramedHamiltonian(core_pair,t,v,Wᴸ[k],Wᴿ), 
+                          core_pair -> FramedHamiltonian(H,core_pair,Fᴸ[k],Fᴿ), 
                           contract(x.cores[k],x.cores[k+1]), 1, :SR;
                           krylovdim=5,
                           issymmetric=true, tol=inner_tol, verbosity=0)
 
     λ = vals[1]
-    S = factor_svd!(x.cores[k],x.cores[k+1],vecs[1], ep)
-    rmul!(x.cores[k], Diagonal.(S)) 
+    Xₖ, S, Xₖ₊₁ = factor_svd!(vecs[1], ep)
+    rmul!(Xₖ, S)
+    set_core!(x, Xₖ)
+    set_core!(x, Xₖ₊₁)
     rank(x,k+1) .= x.cores[k].col_ranks
 
     x.corePosition = k
     if k>1 
-      # Compute the new right frame matrix Wᴿ
-      Wᴿ = FramingStepLeft(t,v,x,k+1,Wᴿ)
+      # Compute the new right frame matrix Fᴿ
+      Fᴿ = FramingStepLeft(H,x,Fᴿ)
     end
   end
 
@@ -115,26 +116,63 @@ struct ContractedSparseCores{T<:Number,N,d} <: AbstractArray{Matrix{T},4}
   col_ranks::OffsetVector{Int, Vector{Int}}
 
   blocks::OffsetVector{Matrix{T}, Vector{Matrix{T}}}
+
+  mem::Memory{T}
 end
 
-function Base.size(v::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
+function ContractedSparseCores{T,N,d}( k::Int,
+              row_ranks::OffsetVector{Int, Vector{Int}},
+              col_ranks::OffsetVector{Int, Vector{Int}}) where {T<:Number,N,d}
+  row_qn = occupation_qn(N,d,k)
+  mid_qn = occupation_qn(N,d,k+1)
+  col_qn = occupation_qn(N,d,k+2)
+
+  m = length(row_qn)
+  n = length(col_qn)
+
+  @boundscheck @assert row_qn == axes(row_ranks,1)
+  @boundscheck @assert col_qn == axes(col_ranks,1)
+
+  shapes = OffsetVector([ (sum(row_ranks[(m-1:m)∩row_qn]),  sum(col_ranks[(m:m+1)∩col_qn])) for m in mid_qn], mid_qn)
+
+  mem = Memory{T}(undef, sum(prod.(shapes)))
+  fill!(mem, T(0))
+  idx = 1
+
+  blocks = OffsetVector( Vector{Matrix{T}}(undef, size(mid_qn,1)), mid_qn )
+  for m in mid_qn
+    shape = shapes[m]
+    if prod(shape)>0
+      blocks[m] = Base.wrap(Array, memoryref(mem, idx), shape)
+    else
+      blocks[m] = zeros(T,shape)
+    end
+    idx += length(blocks[m])
+  end
+
+  return ContractedSparseCores{T,N,d}( k, m, n, 
+                                      row_qn, col_qn, 
+                                      deepcopy(row_ranks), 
+                                      deepcopy(col_ranks),
+                                      blocks, mem)
+end
+
+@inline function Base.size(v::ContractedSparseCores)
   return (v.m,v.n)
 end
 
 function Base.similar(v::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
-  return ContractedSparseCores{T,N,d}(v.k, v.m, v.n, 
-                                      v.row_qn, v.col_qn, 
-                                      v.row_ranks, 
-                                      v.col_ranks,
-                                      similar.(v.blocks))
+  return ContractedSparseCores{T,N,d}(v.k, v.row_ranks, v.col_ranks)
+end
+
+@inline function site(v::ContractedSparseCores)
+  return v.k
 end
 
 function Base.:*(α::Number, v::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
-  return ContractedSparseCores{T,N,d}(v.k, v.m, v.n, 
-                                      v.row_qn, v.col_qn, 
-                                      v.row_ranks, 
-                                      v.col_ranks,
-                                      α .* v.blocks)
+  w = similar(v)
+  w.blocks .*= α
+  return w
 end
 
 function LinearAlgebra.mul!(w::ContractedSparseCores{T,N,d}, v::ContractedSparseCores{T,N,d}, α::Number) where {T<:Number,N,d}
@@ -150,6 +188,11 @@ function LinearAlgebra.mul!(w::ContractedSparseCores{T,N,d}, v::ContractedSparse
 
   mul!.(w.blocks, α, v.blocks)
   return w
+end
+
+function LinearAlgebra.lmul!(α::Number, v::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
+  lmul!.(α, v.blocks)
+  return v
 end
 
 function LinearAlgebra.rmul!(v::ContractedSparseCores{T,N,d}, α::Number) where {T<:Number,N,d}
@@ -183,7 +226,7 @@ function LinearAlgebra.axpby!(α::Number, v::ContractedSparseCores{T,N,d}, β::N
     @assert w.col_ranks == v.col_ranks
   end
 
-  axpy!.(α,v.blocks,β,w.blocks)
+  axpby!.(α,v.blocks,β,w.blocks)
   return w
 end
 
@@ -205,133 +248,162 @@ function contract(Xₖ::SparseCore{T,N,d}, Xₖ₊₁::SparseCore{T,N,d}) where 
     @assert Xₖ.k+1 == Xₖ₊₁.k
     @assert Xₖ.col_ranks == Xₖ₊₁.row_ranks
   end
-
   k = Xₖ.k
-  m = Xₖ.m
-  n = Xₖ₊₁.n
-
-  row_qn = Xₖ.row_qn
-  mid_qn = Xₖ.col_qn
-  col_qn = Xₖ₊₁.col_qn
-
   row_ranks = Xₖ.row_ranks
   col_ranks = Xₖ₊₁.col_ranks
+  twocores = ContractedSparseCores{T,N,d}(k,row_ranks,col_ranks)
 
-  blocks = [Matrix{T}(undef,0,0) for m in mid_qn]
+  mid_qn = occupation_qn(N,d,k+1)
   for m in mid_qn
-    ql = (m-1:m)∩Xₖ.row_qn
-    qr = (m:m+1)∩Xₖ₊₁.col_qn
-
-    Nr, Nc = sum(row_ranks[ql]), sum(col_ranks[qr])
-
-    blocks[m] = zeros(T,Nr,Nc)
-    for l in ql, r in qr
+    for l in (m-1:m)∩axes(Xₖ,1), r in (m:m+1)∩axes(Xₖ₊₁,3)
+      Nr, Nc = size(twocores.blocks[m])
       rows = (l == m-1 ? (1:row_ranks[l]) : (Nr-row_ranks[l]+1:Nr))
-        cols = (r == m   ? (1:col_ranks[r]) : (Nc-col_ranks[r]+1:Nc))
-        contract!(view(blocks[m],rows,cols), Xₖ[l,m], Xₖ₊₁[m,r])
+      cols = (r == m   ? (1:col_ranks[r]) : (Nc-col_ranks[r]+1:Nc))
+      mul!(view(twocores.blocks[m],rows,cols), Xₖ[l,m], Xₖ₊₁[m,r])
     end
   end
 
-  twocores = ContractedSparseCores{T,N,d}(k,m,n,row_qn,col_qn,row_ranks,col_ranks,blocks)
   return twocores
 end
 
 function factor_qc(twocores::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
   k = twocores.k
-  Xₖ = SparseCore{T,N,d}(k)
-  Xₖ₊₁ = SparseCore{T,N,d}(k+1)
-  mid_qn = Xₖ.col_qn
-  @boundscheck @assert Xₖ₊₁.row_qn == mid_qn
-  Xₖ.row_ranks .= twocores.row_ranks
-  Xₖ₊₁.col_ranks .= twocores.col_ranks
+  mid_qn = occupation_qn(N,d,k+1)
+
+  Q = OffsetVector(   Vector{Matrix{T}}(undef, length(mid_qn)), mid_qn)
+  C = OffsetVector(   Vector{Matrix{T}}(undef, length(mid_qn)), mid_qn)
+  mid_rank = OffsetVector( Vector{Int}( undef, length(mid_qn)), mid_qn)
+  for m in mid_qn
+    Q[m],C[m],mid_rank[m] = my_qc!(copy(twocores.blocks[m]))
+  end
+  Xₖ = SparseCore{T,N,d}(k, twocores.row_ranks, mid_rank)
+  Xₖ₊₁ = SparseCore{T,N,d}(k+1, mid_rank, twocores.col_ranks)
 
   for m in mid_qn
-    Q,C,rank = my_qc!(copy(twocores.blocks[m]))
-    Xₖ.col_ranks[m] = rank
-    Xₖ₊₁.row_ranks[m] = rank
-    Xₖ[m,:vertical] = Q
-    Xₖ₊₁[m,:horizontal] = C
+    Xₖ[m,:vertical] = Q[m]
+    Xₖ₊₁[m,:horizontal] = C[m]
   end
 
   return Xₖ, Xₖ₊₁
 end
 
-function factor_svd!(Xₖ::SparseCore{T,N,d}, Xₖ₊₁::SparseCore{T,N,d}, twocores::ContractedSparseCores{T,N,d}, ep::Float64) where {T<:Number,N,d}
+function factor_svd!(twocores::ContractedSparseCores{T,N,d}, ep::Float64) where {T<:Number,N,d}
   k = twocores.k
-  mid_qn = Xₖ.col_qn
+  mid_qn = occupation_qn(N,d,k+1)
 
-  @boundscheck begin
-    @assert Xₖ.k == k && Xₖ₊₁.k == k+1
-    @assert Xₖ.row_ranks == twocores.row_ranks
-    @assert Xₖ₊₁.col_ranks == twocores.col_ranks
-    @assert Xₖ₊₁.row_qn == mid_qn
-  end
+  U  = OffsetVector(  Vector{Matrix{T}}(undef, length(mid_qn)), mid_qn)
+  S  = OffsetVector(  Vector{Vector{T}}(undef, length(mid_qn)), mid_qn)
+  Vt = OffsetVector(  Vector{Matrix{T}}(undef, length(mid_qn)), mid_qn)
+  mid_rank = OffsetVector( Vector{Int}( undef, length(mid_qn)), mid_qn)
 
-  U   = [zeros(T,0,0) for m in mid_qn]
-  S   = [zeros(T,0  ) for m in mid_qn]
-  Vt  = [zeros(T,0,0) for m in mid_qn]
   for m in mid_qn
     F = svd!(twocores.blocks[m])
     U[m],S[m],Vt[m] = F.U, F.S, F.Vt
   end
-  ranks = chop(S, ep)
-  s = norm(norm.(S))
+  S = Frame{T,N,d}(k+1,Diagonal.(S))
+  mid_rank = chop(S, ep)
+  s = norm(S)
 
+  Xₖ   = SparseCore{T,N,d}(k,   twocores.row_ranks, mid_rank)
+  Xₖ₊₁ = SparseCore{T,N,d}(k+1, mid_rank, twocores.col_ranks)
   for m in mid_qn
-    r = ranks[m]
-    S[m] = S[m][1:r] ./ s
-    Xₖ.col_ranks[m] = r
-    Xₖ[m,:vertical] = U[m][:,1:r]
-    Xₖ₊₁.row_ranks[m] = r
+    r = mid_rank[m]
+    S[m] = Diagonal(diag(S[m])[1:r] ./ s)
+    Xₖ[m,:vertical]     = U[m][:,1:r]
     Xₖ₊₁[m,:horizontal] = Vt[m][1:r,:]
   end
 
-  return S
+  return Xₖ, S, Xₖ₊₁
 end
 
-function FramedHamiltonian(twocores_in::ContractedSparseCores{T,N,d},
-                                     t::Matrix{T}, 
-                                     v::Array{T,4},
-                                    Wᴸ::OffsetVector{Matrix{T},Vector{Matrix{T}}}, 
-                                    Wᴿ::OffsetVector{Matrix{T},Vector{Matrix{T}}}) where {T<:Number,N,d}
-  Xₖ, Xₖ₊₁ = factor_qc(twocores_in)
-  row_ranks = Xₖ.row_ranks
-  col_ranks = Xₖ₊₁.col_ranks
+function VectorInterface.zerovector(x::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
+  y = similar(x)
+  fill!.(y.blocks, T(0))
+  return y
+end
 
+function VectorInterface.zerovector(x::ContractedSparseCores{S,N,d}, T::Type{<:Number}) where {S<:Number,N,d}
+  return ContractedSparseCores{T,N,d}( x.k, x.row_ranks, x.col_ranks)
+end
 
-  # Frame matrix-free Hamiltonian operation applied to both cores
-  HXₖ = sparse_H_matvec(Xₖ, t, v)
-  HXₖ₊₁ = sparse_H_matvec(Xₖ₊₁, t, v)
-  mid_qn = Xₖ.col_qn
+function VectorInterface.add!!(y::ContractedSparseCores{T,N,d}, x::ContractedSparseCores{T,N,d}, α::Number, β::Number) where {T<:Number,N,d}
+  axpby!(α,x,β,y)
+end
 
-  twocores_out = similar(twocores_in)
+function VectorInterface.scale(x::ContractedSparseCores{T,N,d}, α::Number) where {T<:Number,N,d}
+    return VectorInterface.scale!!(deepcopy(x), α)
+end
 
-  for m in mid_qn
-    ql = (m-1:m)∩Xₖ.row_qn
-    qr = (m:m+1)∩Xₖ₊₁.col_qn
-    Nr, Nc = size(twocores_out.blocks[m])
+function VectorInterface.scale!!(x::ContractedSparseCores{T,N,d}, α::Number) where {T<:Number,N,d}
+    α === VectorInterface.One() && return x
+    return lmul!(α,x)
+end
 
-    L = zeros(T, Nr, HXₖ[2][m])
-    for l in ql
-      rows = (l == m-1 ? (1:row_ranks[l]) : (Nr-row_ranks[l]+1:Nr))
-      for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
-        if isnonzero(V,l,m)
-          @views mul!(L[rows,J[m]], Wᴸ[l][:,I[l]], V[l,m], 1., 1.)
-        end
-      end
-    end
+function VectorInterface.scale!!(y::ContractedSparseCores{T,N,d}, x::ContractedSparseCores{T,N,d}, α::Number) where {T<:Number,N,d}
+    return mul!(y,x,α)
+end
 
-    R = zeros(T, HXₖ₊₁[1][m], Nc)
-    for r in qr
-      cols = (r == m   ? (1:col_ranks[r]) : (Nc-col_ranks[r]+1:Nc))
-      for (I,J,V) in zip(HXₖ₊₁[3],HXₖ₊₁[4],HXₖ₊₁[5])
-        if isnonzero(V,m,r)
-          @views mul!(R[I[m],cols], V[m,r], Wᴿ[r][J[r],:], 1., 1.)
-        end
-      end
-    end
-
-    mul!(twocores_out.blocks[m], L, R)
+@propagate_inbounds function VectorInterface.inner(x::ContractedSparseCores{T,N,d}, y::ContractedSparseCores{T,N,d}) where {T<:Number,N,d}
+  @boundscheck begin
+    @assert x.row_ranks == y.row_ranks
+    @assert x.col_ranks == y.col_ranks
   end
-  return twocores_out
+
+  s = T(0)
+  for (X,Y) in zip(x.blocks, y.blocks)
+    s += dot(X,Y)
+  end
+  return s
+end
+
+function FramedHamiltonian(H::SparseHamiltonian{T,N,d},
+                               twocores_in::ContractedSparseCores{T,N,d},
+                                    Fᴸ::Frame{T,N,d}, 
+                                    Fᴿ::Frame{T,N,d}) where {T<:Number,N,d}
+  @boundscheck begin
+    @assert site(Fᴸ) == site(twocores_in) == site(Fᴿ)-2
+  end
+  Xₖ, Xₖ₊₁ = factor_qc(twocores_in)
+
+  return contract( Fᴸ*H*Xₖ, H*Xₖ₊₁*Fᴿ )
+  
+  # row_ranks = Xₖ.row_ranks
+  # col_ranks = Xₖ₊₁.col_ranks
+
+
+  # # Frame matrix-free Hamiltonian operation applied to both cores
+  # HXₖ = H_matvec_core(H, Xₖ)
+  # HXₖ₊₁ = H_matvec_core(H, Xₖ₊₁)
+  # mid_qn = Xₖ.col_qn
+
+  # twocores_out = similar(twocores_in)
+
+  # for m in mid_qn
+  #   ql = (m-1:m)∩Xₖ.row_qn
+  #   qr = (m:m+1)∩Xₖ₊₁.col_qn
+  #   Nr, Nc = size(twocores_out.blocks[m])
+
+  #   L = zeros(T, Nr, HXₖ[2][m])
+  #   for l in ql
+  #     rows = (l == m-1 ? (1:row_ranks[l]) : (Nr-row_ranks[l]+1:Nr))
+  #     for (I,J,V) in zip(HXₖ[3],HXₖ[4],HXₖ[5])
+  #       if isnonzero(V,l,m)
+  #         @views mul!(L[rows,J[m]], Fᴸ[l][:,I[l]], V[l,m], 1., 1.)
+  #       end
+  #     end
+  #   end
+
+  #   R = zeros(T, HXₖ₊₁[1][m], Nc)
+  #   for r in qr
+  #     cols = (r == m   ? (1:col_ranks[r]) : (Nc-col_ranks[r]+1:Nc))
+  #     for (I,J,V) in zip(HXₖ₊₁[3],HXₖ₊₁[4],HXₖ₊₁[5])
+  #       if isnonzero(V,m,r)
+  #         @views mul!(R[I[m],cols], V[m,r], Fᴿ[r][J[r],:], 1., 1.)
+  #       end
+  #     end
+  #   end
+
+  #   mul!(twocores_out.blocks[m], L, R)
+  # end
+  # return twocores_out
 end

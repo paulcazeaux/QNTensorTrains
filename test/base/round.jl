@@ -24,7 +24,6 @@ end
   x = tt_randn(Val(d),Val(N),r)
   X = Array(x)
   QNTensorTrains.leftOrthogonalize!(x, keepRank=true)
-
   isapprox( norm( X - Array(x) ), 0.0,  atol=1e-12 * norm(X) ) && all(all(rank(x,k) .== r[k]) for k=1:d+1)
 end
 
