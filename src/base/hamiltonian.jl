@@ -376,7 +376,7 @@ struct SparseHamiltonian{T<:Number,N,d}
         end
         col_starts[end] = nnz+1
 
-        csc_blocks[k][occ_n][n][occ_m][m] = ( col_starts, block[2][p_col], block[3][p_col] )
+        csc_blocks[k][occ_n][n][occ_m][m] = (col_starts, block[1][p_col], block[3][p_col] )
       end
     end
 
@@ -457,59 +457,178 @@ function Base.:*(Fᴸ::Frame{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{
 
   y = SparseCore{T,N,d}(x.k, Fᴸ.row_ranks, col_ranks(H,x))
   COO = H.coo_blocks[x.k]
+  CSR = H.csr_blocks[x.k]
+  CSC = H.csc_blocks[x.k]
   @sync begin
     for n in axes(unoccupied(y),1)
       @Threads.spawn let Y = unoccupied(y,n), F = Fᴸ[n]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
-          # if !isempty(COO.unoccupied[n].unoccupied[m][1])
-          #   nnz = length(COO.unoccupied[n].unoccupied[m][1])
-          #   row_ratio = -nnz/-(extrema(COO.unoccupied[n].unoccupied[m][1])...)
-          #   col_ratio = -nnz/-(extrema(COO.unoccupied[n].unoccupied[m][2])...)
-          #   @show site(x),n,m,nnz,row_ratio,col_ratio
-          # end
-          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
-            mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+
+          nnz = length(COO.unoccupied[n].unoccupied[m][1])
+          nrow = length(CSR.unoccupied[n].unoccupied[m][1])
+          ncol = length(CSC.unoccupied[n].unoccupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.unoccupied[n].unoccupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                Fj = zeros(T, size(F,1), size(X,1))
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, view(F,:,I[n][i]), Fj)
+                end
+                mul!( view(Y,:,J[n][j]), Fj, X, 1, 1)
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.unoccupied[n].unoccupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                FiX = view(F,:,I[n][i])*X
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, FiX, view(Y,:,J[n][j]))
+                end
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+              mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+            end
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
-          # if !isempty(COO.unoccupied[n].occupied[m][1])
-          #   nnz = length(COO.unoccupied[n].occupied[m][1])
-          #   row_ratio = -nnz/-(extrema(COO.unoccupied[n].occupied[m][1])...)
-          #   col_ratio = -nnz/-(extrema(COO.unoccupied[n].occupied[m][2])...)
-          #   @show site(x),n,m,nnz,row_ratio,col_ratio
-          # end
           X = occupied(x,m)
-          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
-            mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+
+          nnz = length(COO.unoccupied[n].occupied[m][1])
+          nrow = length(CSR.unoccupied[n].occupied[m][1])
+          ncol = length(CSC.unoccupied[n].occupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.unoccupied[n].occupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                Fj = zeros(T, size(F,1), size(X,1))
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, view(F,:,I[n][i]), Fj)
+                end
+                mul!( view(Y,:,J[n][j]), Fj, X, 1, 1)
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.unoccupied[n].occupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                FiX = view(F,:,I[n][i])*X
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, FiX, view(Y,:,J[n][j]))
+                end
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+              mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+            end
           end
         end
       end
     end
+
     for n in axes(occupied(y),1)
       @Threads.spawn let Y = occupied(y,n), F = Fᴸ[n]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
-          # if !isempty(COO.occupied[n].unoccupied[m][1])
-          #   nnz = length(COO.occupied[n].unoccupied[m][1])
-          #   row_ratio = -nnz/-(extrema(COO.occupied[n].unoccupied[m][1])...)
-          #   col_ratio = -nnz/-(extrema(COO.occupied[n].unoccupied[m][2])...)
-          #   @show site(x),n,m,nnz,row_ratio,col_ratio
-          # end
-          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
-            mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+
+          nnz = length(COO.occupied[n].unoccupied[m][1])
+          nrow = length(CSR.occupied[n].unoccupied[m][1])
+          ncol = length(CSC.occupied[n].unoccupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.occupied[n].unoccupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                Fj = zeros(T, size(F,1), size(X,1))
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, view(F,:,I[n][i]), Fj)
+                end
+                mul!( view(Y,:,J[n+1][j]), Fj, X, 1, 1)
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.occupied[n].unoccupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                FiX = view(F,:,I[n][i])*X
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, FiX, view(Y,:,J[n+1][j]))
+                end
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+              mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+            end
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
           X = occupied(x,m)
-          # if !isempty(COO.occupied[n].occupied[m][1])
-          #   nnz = length(COO.occupied[n].occupied[m][1])
-          #   row_ratio = -nnz/-(extrema(COO.occupied[n].occupied[m][1])...)
-          #   col_ratio = -nnz/-(extrema(COO.occupied[n].occupied[m][2])...)
-          #   @show site(x),n,m,nnz,row_ratio,col_ratio
-          # end
-          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
-            mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+
+          nnz = length(COO.occupied[n].occupied[m][1])
+          nrow = length(CSR.occupied[n].occupied[m][1])
+          ncol = length(CSC.occupied[n].occupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.occupied[n].occupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                Fj = zeros(T, size(F,1), size(X,1))
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, view(F,:,I[n][i]), Fj)
+                end
+                mul!( view(Y,:,J[n+1][j]), Fj, X, 1, 1)
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.occupied[n].occupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                FiX = view(F,:,I[n][i])*X
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, FiX, view(Y,:,J[n+1][j]))
+                end
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+              mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+            end
           end
         end
       end
@@ -528,19 +647,91 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, Fᴿ::Frame{
 
   y = SparseCore{T,N,d}(x.k, row_ranks(H,x), Fᴿ.col_ranks)
   COO = H.coo_blocks[x.k]
+  CSR = H.csr_blocks[x.k]
+  CSC = H.csc_blocks[x.k]
   @sync begin
     for n in axes(unoccupied(y),1)
       @Threads.spawn let Y = unoccupied(y,n), F = Fᴿ[n]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
-          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
-            mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+
+          nnz = length(COO.unoccupied[n].unoccupied[m][1])
+          nrow = length(CSR.unoccupied[n].unoccupied[m][1])
+          ncol = length(CSC.unoccupied[n].unoccupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.unoccupied[n].unoccupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                XFj = X*view(F,J[n][j],:)
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, XFj, view(Y,I[n][i],:))
+                end
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.unoccupied[n].unoccupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                Fi = zeros(T, size(X,2), size(F,2))
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, view(F,J[n][j],:), Fi)
+                end
+                mul!( view(Y,I[n][i],:), X, Fi, 1, 1)
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+              mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+            end
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
           X = occupied(x,m)
-          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
-            mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+
+          nnz = length(COO.unoccupied[n].occupied[m][1])
+          nrow = length(CSR.unoccupied[n].occupied[m][1])
+          ncol = length(CSC.unoccupied[n].occupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.unoccupied[n].occupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                XFj = X*view(F,J[n][j],:)
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, XFj, view(Y,I[n][i],:))
+                end
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.unoccupied[n].occupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                Fi = zeros(T, size(X,2), size(F,2))
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, view(F,J[n][j],:), Fi)
+                end
+                mul!( view(Y,I[n][i],:), X, Fi, 1, 1)
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+              mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+            end
           end
         end
       end
@@ -549,14 +740,84 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, Fᴿ::Frame{
       @Threads.spawn let Y = occupied(y,n), F = Fᴿ[n+1]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
-          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
-            mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+
+          nnz = length(COO.occupied[n].unoccupied[m][1])
+          nrow = length(CSR.occupied[n].unoccupied[m][1])
+          ncol = length(CSC.occupied[n].unoccupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.occupied[n].unoccupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                XFj = X*view(F,J[n+1][j],:)
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, XFj, view(Y,I[n][i],:))
+                end
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.occupied[n].unoccupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                Fi = zeros(T, size(X,2), size(F,2))
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, view(F,J[n+1][j],:), Fi)
+                end
+                mul!( view(Y,I[n][i],:), X, Fi, 1, 1)
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+              mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+            end
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
           X = occupied(x,m)
-          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
-            mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+
+          nnz = length(COO.occupied[n].occupied[m][1])
+          nrow = length(CSR.occupied[n].occupied[m][1])
+          ncol = length(CSC.occupied[n].occupied[m][1])
+          if ncol < min(nnz,nrow)
+            col_index, row_index, v = CSC.occupied[n].occupied[m]
+            for j in axes(col_index,1)[begin:end-1]
+              if col_index[j+1] > col_index[j]+1
+                XFj = X*view(F,J[n+1][j],:)
+                for index in col_index[j]:col_index[j+1]-1
+                  i, α = row_index[index], v[index]
+                  axpy!(α, XFj, view(Y,I[n][i],:))
+                end
+              elseif col_index[j+1] == col_index[j]+1
+                i, α = row_index[col_index[j]], v[col_index[j]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+              end
+            end
+          elseif nrow < min(nnz,ncol)
+            row_index, col_index, v = CSR.occupied[n].occupied[m]
+            for i in axes(row_index,1)[begin:end-1]
+              if row_index[i+1] > row_index[i]+1
+                Fi = zeros(T, size(X,2), size(F,2))
+                for index in row_index[i]:row_index[i+1]-1
+                  j, α = col_index[index], v[index]
+                  axpy!(α, view(F,J[n+1][j],:), Fi)
+                end
+                mul!( view(Y,I[n][i],:), X, Fi, 1, 1)
+              elseif row_index[i+1] == row_index[i]+1
+                j, α = col_index[row_index[i]], v[row_index[i]]
+                mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+              end
+            end
+          else # nnz < min(nrow,ncol)
+            for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+              mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+            end
           end
         end
       end
@@ -574,18 +835,90 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
 
   y = Frame{T,N,d}(x.k+1, row_ranks(l), col_ranks(H,x))
   COO = H.coo_blocks[x.k]
+  CSR = H.csr_blocks[x.k]
+  CSC = H.csc_blocks[x.k]
   @sync for n in axes(unoccupied(parent(l)),1)
     @Threads.spawn let Y = y[n], L = unoccupied(l,n)
       for m in axes(unoccupied(x),1)∩(n-2:n+2)
         X = unoccupied(x,m)
-        for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
-          mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+
+        nnz = length(COO.unoccupied[n].unoccupied[m][1])
+        nrow = length(CSR.unoccupied[n].unoccupied[m][1])
+        ncol = length(CSC.unoccupied[n].unoccupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.unoccupied[n].unoccupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              Lj = zeros(T, size(F,1), size(X,1))
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, view(L,:,I[n][i]), Lj)
+              end
+              mul!( view(Y,:,J[n][j]), Lj, X, 1, 1)
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.unoccupied[n].unoccupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              LiX = view(L,:,I[n][i])*X
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, LiX, view(Y,:,J[n][j]))
+              end
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+            mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+          end
         end
       end
       for m in axes(occupied(x),1)∩(n-2:n+2)
         X = occupied(x,m)
-        for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
-          mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+
+        nnz = length(COO.unoccupied[n].occupied[m][1])
+        nrow = length(CSR.unoccupied[n].occupied[m][1])
+        ncol = length(CSC.unoccupied[n].occupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.unoccupied[n].occupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              Lj = zeros(T, size(F,1), size(X,1))
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, view(L,:,I[n][i]), Lj)
+              end
+              mul!( view(Y,:,J[n][j]), Lj, X, 1, 1)
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.unoccupied[n].occupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              LiX = view(L,:,I[n][i])*X
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, LiX, view(Y,:,J[n][j]))
+              end
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+            mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+          end
         end
       end
     end
@@ -594,14 +927,84 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
     @Threads.spawn let Y = y[n+1], L = occupied(l,n+1)
       for m in axes(unoccupied(x),1)∩(n-2:n+2)
         X = unoccupied(x,m)
-        for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
-          mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+
+        nnz = length(COO.occupied[n].unoccupied[m][1])
+        nrow = length(CSR.occupied[n].unoccupied[m][1])
+        ncol = length(CSC.occupied[n].unoccupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.occupied[n].unoccupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              Lj = zeros(T, size(F,1), size(X,1))
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, view(L,:,I[n][i]), Lj)
+              end
+              mul!( view(Y,:,J[n+1][j]), Lj, X, 1, 1)
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.occupied[n].unoccupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              LiX = view(L,:,I[n][i])*X
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, LiX, view(Y,:,J[n+1][j]))
+              end
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+            mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+          end
         end
       end
       for m in axes(occupied(x),1)∩(n-2:n+2)
         X = occupied(x,m)
-        for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
-          mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+
+        nnz = length(COO.occupied[n].occupied[m][1])
+        nrow = length(CSR.occupied[n].occupied[m][1])
+        ncol = length(CSC.occupied[n].occupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.occupied[n].occupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              Lj = zeros(T, size(F,1), size(X,1))
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, view(L,:,I[n][i]), Lj)
+              end
+              mul!( view(Y,:,J[n+1][j]), Lj, X, 1, 1)
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.occupied[n].occupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              LiX = view(L,:,I[n][i])*X
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, LiX, view(Y,:,J[n+1][j]))
+              end
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+            mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+          end
         end
       end
     end
@@ -618,18 +1021,90 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
 
   y = Frame{T,N,d}(x.k, row_ranks(H,x), col_ranks(r))
   COO = H.coo_blocks[x.k]
+  CSR = H.csr_blocks[x.k]
+  CSC = H.csc_blocks[x.k]
   @sync for n in axes(unoccupied(parent(r)),1)
     @Threads.spawn let Y = y[n], R = unoccupied(r,n)
       for m in axes(unoccupied(x),1)∩(n-2:n+2)
         X = unoccupied(x,m)
-        for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
-          mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+
+        nnz = length(COO.unoccupied[n].unoccupied[m][1])
+        nrow = length(CSR.unoccupied[n].unoccupied[m][1])
+        ncol = length(CSC.unoccupied[n].unoccupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.unoccupied[n].unoccupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              XRj = X*view(R,J[n][j],:)
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, XRj, view(Y,I[n][i],:))
+              end
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.unoccupied[n].unoccupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              Ri = zeros(T, size(X,2), size(F,2))
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, view(R,J[n][j],:), Ri)
+              end
+              mul!( view(Y,I[n][i],:), X, Ri, 1, 1)
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+          end
         end
       end
       for m in axes(occupied(x),1)∩(n-2:n+2)
         X = occupied(x,m)
-        for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
-          mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+
+        nnz = length(COO.unoccupied[n].occupied[m][1])
+        nrow = length(CSR.unoccupied[n].occupied[m][1])
+        ncol = length(CSC.unoccupied[n].occupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.unoccupied[n].occupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              XRj = X*view(R,J[n][j],:)
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, XRj, view(Y,I[n][i],:))
+              end
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.unoccupied[n].occupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              Ri = zeros(T, size(X,2), size(F,2))
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, view(R,J[n][j],:), Ri)
+              end
+              mul!( view(Y,I[n][i],:), X, Ri, 1, 1)
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+          end
         end
       end
     end
@@ -638,14 +1113,84 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
     @Threads.spawn let Y = y[n], R = occupied(r,n+1)
       for m in axes(unoccupied(x),1)∩(n-2:n+2)
         X = unoccupied(x,m)
-        for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
-          mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+
+        nnz = length(COO.occupied[n].unoccupied[m][1])
+        nrow = length(CSR.occupied[n].unoccupied[m][1])
+        ncol = length(CSC.occupied[n].unoccupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.occupied[n].unoccupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              XRj = X*view(R,J[n+1][j],:)
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, XRj, view(Y,I[n][i],:))
+              end
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.occupied[n].unoccupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              Ri = zeros(T, size(X,2), size(F,2))
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, view(R,J[n+1][j],:), Ri)
+              end
+              mul!( view(Y,I[n][i],:), X, Ri, 1, 1)
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+          end
         end
       end
       for m in axes(occupied(x),1)∩(n-2:n+2)
         X = occupied(x,m)
-        for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
-          mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+
+        nnz = length(COO.occupied[n].occupied[m][1])
+        nrow = length(CSR.occupied[n].occupied[m][1])
+        ncol = length(CSC.occupied[n].occupied[m][1])
+        if ncol < min(nnz,nrow)
+          col_index, row_index, v = CSC.occupied[n].occupied[m]
+          for j in axes(col_index,1)[begin:end-1]
+            if col_index[j+1] > col_index[j]+1
+              XRj = X*view(R,J[n+1][j],:)
+              for index in col_index[j]:col_index[j+1]-1
+                i, α = row_index[index], v[index]
+                axpy!(α, XRj, view(Y,I[n][i],:))
+              end
+            elseif col_index[j+1] == col_index[j]+1
+              i, α = row_index[col_index[j]], v[col_index[j]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+            end
+          end
+        elseif nrow < min(nnz,ncol)
+          row_index, col_index, v = CSR.occupied[n].occupied[m]
+          for i in axes(row_index,1)[begin:end-1]
+            if row_index[i+1] > row_index[i]+1
+              Ri = zeros(T, size(X,2), size(F,2))
+              for index in row_index[i]:row_index[i+1]-1
+                j, α = col_index[index], v[index]
+                axpy!(α, view(R,J[n+1][j],:), Ri)
+              end
+              mul!( view(Y,I[n][i],:), X, Ri, 1, 1)
+            elseif row_index[i+1] == row_index[i]+1
+              j, α = col_index[row_index[i]], v[row_index[i]]
+              mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+            end
+          end
+        else # nnz < min(nrow,ncol)
+          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+          end
         end
       end
     end

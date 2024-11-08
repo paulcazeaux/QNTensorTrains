@@ -9,13 +9,6 @@ module QNTensorTrains
 using OffsetArrays, LinearAlgebra, VectorInterface, Random
 import Base: @propagate_inbounds
 
-BLAS.set_num_threads(1)
-
-
-abstract type Unfolding end
-struct Horizontal <: Unfolding end
-struct Vertical <: Unfolding end
-
 include("base/frame.jl")
 include("base/util.jl")
 include("base/sparsecore.jl")

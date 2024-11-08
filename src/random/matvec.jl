@@ -227,7 +227,7 @@ end
       SₖFᴿ = [ s == 1 ? 
   (@timeit to "Randomized matvec" begin
      H * core(summands[1],k-1) * (SₖFᴿ[1] * adjoint(Q)) end) : 
-      (@timeit to "SₖFᴿ" begin 
+      (@timeit to "Frame SₖFᴿ" begin 
          core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) end) 
             for s in axes(summands,1)]
     else
