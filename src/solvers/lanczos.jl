@@ -106,7 +106,7 @@ end
 
 @timeit to "Randomized MatVec" begin
   # q̃ = randRound_H_MatVecAdd([1,-α], H, [q0,q0], rmax, over)
-  q̃ = randRound_H_MatVecAdd2([1,-α], H, [q0,q0], rmax+over)
+  q̃ = randRound_H_MatVecAdd2([1,-α], H, [q0,q0], rmax+over, to)
   push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin
@@ -133,7 +133,7 @@ end
 
 @timeit to "Randomized MatVec" begin
     # q̃ = randRound_H_MatVecAdd([1,-α,-β], H, [Q[end],Q[end],Q[end-1]], rmax, over)
-    q̃ = randRound_H_MatVecAdd2([1,-α,-β], H, [Q[end],Q[end],Q[end-1]], rmax+over)
+    q̃ = randRound_H_MatVecAdd2([1,-α,-β], H, [Q[end],Q[end],Q[end-1]], rmax+over, to)
     push!(ranks, maximum(maximum.(rank(q̃))))
 end
 @timeit to "Orthonormalization" begin

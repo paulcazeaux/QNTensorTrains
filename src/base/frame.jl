@@ -1,3 +1,5 @@
+abstract type AbstractFrame{T<:Number,N,d} <: AbstractArray{T,2} end
+
 """
   Frame{T<:Number,N,d,S<:Side}
 
@@ -18,7 +20,7 @@ or right-to-left  framing:
 
 N is the total number of electrons and d is the overall tensor order; dictates structure
 """
-struct Frame{T<:Number,N,d,M<:AbstractMatrix{T}} <: AbstractArray{AbstractMatrix{T},2}
+struct Frame{T<:Number,N,d,M<:AbstractMatrix{T}} <: AbstractFrame{T,N,d}
   k::Int        # Framed core index
   n::Int        # column size
 
@@ -119,23 +121,43 @@ end
   return A.k
 end
 
-@inline @propagate_inbounds function Base.getindex(A::Frame{T,N,d,M}, l::Int, r::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+@inline function row_ranks(A::Frame)
+  return A.row_ranks
+end
+@inline function row_rank(A::Frame,l::Int)
+  return A.row_ranks[l]
+end
+@inline function col_ranks(A::Frame)
+  return A.col_ranks
+end
+@inline function col_rank(A::Frame, r::Int)
+  return A.col_ranks[r]
+end
+
+@inline function blocks(A::Frame)
+  return A.blocks
+end
+
+@inline function block(A::Frame, l::Int)
+  return A.blocks[l]
+end
+
+@inline @propagate_inbounds function Base.getindex(A::AbstractFrame, l::Int, r::Int)
   @boundscheck checkbounds(A,l,r)
   if l == r
-    @inbounds a = A.blocks[l]
+    @inbounds a = block(A,l)
   else
-    a = M(undef, A.row_ranks[l], A.col_ranks[r])
-    fill!(a, 0)
+    throw(BoundsError(A, (l,r)))
   end
   return a
 end
 
-@inline @propagate_inbounds function Base.getindex(A::Frame, n::Int)
+@inline @propagate_inbounds function Base.getindex(A::AbstractFrame, n::Int)
   @boundscheck checkbounds(A,n,n)
   return A.blocks[n]
 end
 
-@inline @propagate_inbounds function Base.setindex!(A::Frame, X, l::Int, r::Int)
+@inline @propagate_inbounds function Base.setindex!(A::AbstractFrame, X, l::Int, r::Int)
   if r == l # Diagonal state
     A[l] = X
   else # Forbidden
@@ -150,7 +172,7 @@ end
       throw(DimensionMismatch("Trying to assign block of size $(size(X)) to a block of prescribed ranks $((A.row_ranks[n], A.col_ranks[n]))"))
   end
   if isdefined(A, :mem)
-    copyto!(A.blocks[n], X)
+    copyto!(block(A,n), X)
   else
     A.blocks[n] = X
     A.row_ranks[n], A.col_ranks[n] = size(X)
@@ -189,47 +211,6 @@ end
 
 function LinearAlgebra.norm(A::Frame)
   return sqrt(sum(b->sum(abs2,b), A.blocks))
-end
-
-
-@propagate_inbounds function Base.getindex(A::Frame{T,N,d},  ::Colon, ::Colon) where {T<:Number,N,d}
-  return Frame{T,N,d}(A.k, [ view(A.blocks[n],:,:) for n in axes(A,1) ] )
-end
-
-@propagate_inbounds function Base.getindex(
-    A::Frame{T,N,d}, 
-    I::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}},
-    ::Colon) where {T<:Number,N,d}
-  @boundscheck begin
-    @assert axes(A,1) == axes(A,2) == axes(I,1)
-    @assert all(I[n] ⊆ 1:A.row_ranks[n] for n in axes(A,1))
-  end
-
-  return Frame{T,N,d}(A.k, [ view(A.blocks[n],I[n],:) for n in axes(A,1) ])
-end
-
-@propagate_inbounds function Base.getindex(
-    A::Frame{T,N,d}, 
-    ::Colon,
-    J::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}}) where {T<:Number,N,d}
-  @boundscheck begin
-    @assert axes(A,1) == axes(A,2) == axes(J,1)
-    @assert all(J[n] ⊆ 1:A.col_ranks[n] for n in axes(A,2))
-  end
-  return Frame{T,N,d}(A.k, [ view(A.blocks[n],:,J[n]) for n in axes(A,2) ] )
-end
-
-
-@propagate_inbounds function Base.getindex(
-    A::Frame{T,N,d}, 
-    I::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}},
-    J::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}}) where {T<:Number,N,d}
-  @boundscheck begin
-    @assert axes(A,1) == axes(A,2) == axes(I,1) == axes(J,1)
-    @assert all(I[n] ⊆ 1:A.row_ranks[n] for n in axes(A,1))
-    @assert all(J[n] ⊆ 1:A.col_ranks[n] for n in axes(A,3))
-  end
-  return Frame{T,N,d}(A.k, [ view(A.blocks[n],I[n],J[n]) for n in axes(A,1) ])
 end
 
 @propagate_inbounds function Base.copyto!(dest::Frame{T,N,d}, src::Frame{T,N,d}) where {T<:Number,N,d}

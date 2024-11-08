@@ -1,5 +1,8 @@
+abstract type AbstractCore{T<:Number,N,d} <: AbstractArray{T,3} end
+abstract type AbstractAdjointCore{T<:Number,N,d} <: AbstractArray{T,3} end
+
 """
-  SparseCore{T<:Number,N,d,k}
+  SparseCore{T<:Number,N,d,S<:AbstractMatrix{T}}
 
 Special bidiagonal sparse structure,
 where diagonal  correspond to modal index = 1, 
@@ -7,7 +10,7 @@ and  just above the diagonal correspond to modal index 2
 
 N is the total number of electrons and d is the overall tensor order; dictates structure
 """
-struct SparseCore{T<:Number,N,d,S<:AbstractMatrix{T}} <: AbstractArray{S,3}
+struct SparseCore{T,N,d,S<:AbstractMatrix{T}} <: AbstractCore{T,N,d}
   k::Int        # Core index
 
   m::Int        # row size
@@ -163,7 +166,7 @@ function SparseCore{T,N,d}(s::Bool, Nl::Int, k::Int) where {T<:Number,N,d}
 end
 
 @inline function Base.similar(A::SparseCore{T,N,d,Matrix{T}}) where {T<:Number,N,d}
-  return SparseCore{T,N,d}(site(A),A.row_ranks,A.col_ranks)
+  return SparseCore{T,N,d}(site(A),row_ranks(A),col_ranks(A))
 end
 
 @inline function Base.size(A::SparseCore)
@@ -182,25 +185,52 @@ end
   return A.k
 end
 
-@propagate_inbounds function Base.getindex(A::SparseCore{T,N,d,S}, l::Int, s::Int, r::Int) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+@inline function unoccupied(A::SparseCore)
+  return A.unoccupied
+end
+@inline function unoccupied(A::SparseCore, l::Int)
+  return unoccupied(A)[l]
+end
+
+@inline function occupied(A::SparseCore)
+  return A.occupied
+end
+@inline function occupied(A::SparseCore, l::Int)
+  return occupied(A)[l]
+end
+
+@inline function row_ranks(A::SparseCore)
+  return A.row_ranks
+end
+@inline function row_rank(A::SparseCore,l::Int)
+  return row_ranks(A)[l]
+end
+
+@inline function col_ranks(A::SparseCore)
+  return A.col_ranks
+end
+@inline function col_rank(A::SparseCore,r::Int)
+  return col_ranks(A)[r]
+end
+
+
+@propagate_inbounds function Base.getindex(A::AbstractCore, l::Int, s::Int, r::Int)
   @boundscheck checkbounds(A, l,s,r)
 
   if s==1 && r == l # Unoccupied state
-    return A.unoccupied[l]
+    return unoccupied(A,l)
   elseif s==2 && l+1 == r # Occupied state
-    return A.occupied[l]
+    return occupied(A,l)
   else # Forbidden
-    zero_block = S(undef,A.row_ranks[l],A.col_ranks[r])
-    fill!(zero_block, T(0))
-    return zero_block
+    throw(BoundsError(A, (l,s,r)))
   end
 end
 
-@propagate_inbounds function Base.getindex(A::SparseCore, l::Int, r::Int)
+@propagate_inbounds function Base.getindex(A::AbstractCore, l::Int, r::Int)
   return A[l,r-l+1,r]
 end
 
-@propagate_inbounds function Base.getindex(A::SparseCore{T,N,d,Matrix{T}}, n::Int, unfolding::Symbol) where {T<:Number,N,d}
+@propagate_inbounds function Base.getindex(A::AbstractCore, n::Int, unfolding::Symbol)
   @assert unfolding == :horizontal || unfolding == :vertical ||
           unfolding == :R          || unfolding == :L
 
@@ -213,80 +243,21 @@ end
   end
 end
 
-## Views
-@propagate_inbounds function Base.getindex(
-    A::SparseCore{T,N,d,S},  
-    ::Colon, 
-    ::Colon) where {T<:Number,N,d,S<:AbstractMatrix{T}}
-  row_ranks  = A.col_ranks
-  col_ranks  = A.col_ranks
-  unoccupied = [ view(A.unoccupied[l],:,:) for l in axes(A.unoccupied,1) ] 
-  occupied   = [ view(A.occupied[l],  :,:) for l in axes(A.occupied,  1) ] 
-  return SparseCore{T,N,d}(A.k, unoccupied,occupied)
-end
-
-@propagate_inbounds function Base.getindex(
-    A::SparseCore{T,N,d,S}, 
-    I::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}},
-    ::Colon) where {T<:Number,N,d,S<:AbstractMatrix{T}}
-  @boundscheck begin
-    @assert axes(A,1) == axes(I,1)
-    @assert all(I[l] ⊆ 1:A.row_ranks[l] for l in A.row_qn)
-  end
-  
-  row_ranks  = [ length(I[l]) for l in axes(A.row_ranks,1) ]
-  col_ranks  = A.col_ranks
-  unoccupied = [ view(A.unoccupied[l],I[l],:) for l in axes(A.unoccupied,1) ] 
-  occupied   = [ view(A.occupied[l],  I[l],:) for l in axes(A.occupied,  1) ]
-  return SparseCore{T,N,d}(A.k, unoccupied,occupied)
-end
-
-@propagate_inbounds function Base.getindex(
-    A::SparseCore{T,N,d,S}, 
-    ::Colon,
-    J::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
-  @boundscheck begin
-    @assert axes(A,3) == axes(J,1)
-    @assert all(J[r] ⊆ 1:A.col_ranks[r] for r in A.col_qn)
-  end
-  row_ranks  = A.row_ranks
-  col_ranks  = [ length(J[r]) for r in axes(A.col_ranks,1) ]
-  unoccupied = [ view(A.unoccupied[l],:,J[l  ]) for l in axes(A.unoccupied,1) ] 
-  occupied   = [ view(A.occupied[l],  :,J[l+1]) for l in axes(A.occupied,  1) ]
-  return SparseCore{T,N,d}(A.k, unoccupied,occupied)
-end
-
-
-@propagate_inbounds function Base.getindex(
-    A::SparseCore{T,N,d,S}, 
-    I::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}},
-    J::OffsetVector{UnitRange{Int},Vector{UnitRange{Int}}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
-  @boundscheck begin
-    @assert axes(A,1) == axes(I,1)
-    @assert all(J[r] ⊆ 1:A.col_ranks[r] for r in A.col_qn)
-  end
-  row_ranks  = [ length(I[l]) for l in axes(A.row_ranks,1) ]
-  col_ranks  = [ length(J[r]) for r in axes(A.col_ranks,1) ]
-  unoccupied = [ view(A.unoccupied[l],I[l],J[l  ]) for l in axes(A.unoccupied,1) ] 
-  occupied   = [ view(A.occupied[l],  I[l],J[l+1]) for l in axes(A.occupied,  1) ]
-  return SparseCore{T,N,d}(A.k, unoccupied,occupied)
-end
-
-@propagate_inbounds function Base.setindex!(A::SparseCore{T,N,d,S}, X::S, l::Int,r::Int) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::S, l::Int,r::Int) where {T<:Number, S<:AbstractMatrix{T}}
   Base.setindex!(A,X,l,r-l+1,r)
 end
 
-@propagate_inbounds function Base.setindex!(A::SparseCore{T,N,d,S}, X::S, l::Int,s::Int,r::Int) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+@propagate_inbounds function Base.setindex!(A::SparseCore{T}, X::S, l::Int,s::Int,r::Int) where {T<:Number, S<:AbstractMatrix{T}}
   @boundscheck begin
     checkbounds(A, l,s,r)
-    size(X) == (A.row_ranks[l],A.col_ranks[r]) || 
-      throw(DimensionMismatch("Trying to assign block of size $(size(X)) to a block of prescribed ranks $((A.row_ranks[l], A.col_ranks[r]))"))
+    size(X) == (row_rank(A,l),col_rank(A,r)) || 
+      throw(DimensionMismatch("Trying to assign block of size $(size(X)) to a block of prescribed ranks $((row_rank(A,l), col_rank(A,r)))"))
   end
 
   if s==1 && r == l # Unoccupied state
-    copyto!(A.unoccupied[l], X)
+    copyto!(unoccupied(A,l), X)
   elseif s==2 && l+1 == r # Occupied state
-    copyto!(A.occupied[l], X)
+    copyto!(occupied(A,l), X)
   else # Forbidden
     throw(BoundsError(A, (l,s,r)))
   end
@@ -299,18 +270,18 @@ end
   if unfolding == :horizontal || unfolding == :R
     @boundscheck begin
       n ∈ axes(A,1) || throw(BoundsError(A, (n,:,:)))
-      size(X,2) == sum(A.col_ranks[r] for r∈axes(A,3)∩(n:n+1)) || 
-        throw(DimensionMismatch("Trying to assign block with incorrect number $(size(X,2)) of columns vs expected rank $(sum(A.col_ranks[r] for r∈axes(A,3)∩(n:n+1)))"))
+      size(X,2) == sum(col_rank(A,r) for r∈axes(A,3)∩(n:n+1)) || 
+        throw(DimensionMismatch("Trying to assign block with incorrect number $(size(X,2)) of columns vs expected rank $(sum(col_rank(A,r) for r∈axes(A,3)∩(n:n+1)))"))
     end
-    A.row_ranks[n] = size(X,1)
+    row_ranks(A)[n] = size(X,1)
 
     if n ∈ axes(A,3) && n+1 ∈ axes(A,3)
-      copyto!(A.unoccupied[n], view(X,:,1:A.col_ranks[n]))
-      copyto!(A.occupied[n],   view(X,:,A.col_ranks[n]+1:A.col_ranks[n]+A.col_ranks[n+1]))
+      copyto!(unoccupied(A,n), view(X,:,1:col_rank(A,n)))
+      copyto!(occupied(A,n),   view(X,:,col_rank(A,n)+1:col_rank(A,n)+col_rank(A,n+1)))
     elseif n ∈ axes(A,3)
-      copyto!(A.unoccupied[n], X)
+      copyto!(unoccupied(A,n), X)
     elseif n+1 ∈ axes(A,3)
-      copyto!(A.occupied[n], X)
+      copyto!(occupied(A,n), X)
     else
       throw(BoundsError(A, (n,:,n:n+1)))
     end
@@ -318,34 +289,34 @@ end
   elseif unfolding == :vertical || unfolding == :L
     @boundscheck begin
       n ∈ axes(A,3) || throw(BoundsError(A, (:,:,n)))
-      size(X,1) == sum(A.row_ranks[l] for l∈axes(A,1)∩(n-1:n)) || 
-        throw(DimensionMismatch("Trying to assign block with incorrect number $(size(X,1)) of rows vs expected rank $(sum(A.row_ranks[l] for l∈axes(A,1)∩(n-1:n)))"))
+      size(X,1) == sum(row_rank(A,l) for l∈axes(A,1)∩(n-1:n)) || 
+        throw(DimensionMismatch("Trying to assign block with incorrect number $(size(X,1)) of rows vs expected rank $(sum(row_rank(A,l) for l∈axes(A,1)∩(n-1:n)))"))
     end
-    A.col_ranks[n] = size(X,2)
+    col_ranks(A)[n] = size(X,2)
 
     if n-1 ∈ axes(A,1) && n ∈ axes(A,1)
-      copyto!(A.occupied[n-1], view(X,1:A.row_ranks[n-1],:))
-      copyto!(A.unoccupied[n], view(X,A.row_ranks[n-1]+1:A.row_ranks[n-1]+A.row_ranks[n],:))
+      copyto!(occupied(A,n-1), view(X,1:row_rank(A,n-1),:))
+      copyto!(unoccupied(A,n), view(X,row_rank(A,n-1)+1:row_rank(A,n-1)+row_rank(A,n),:))
     elseif n-1 ∈ axes(A,1)
-      copyto!(A.occupied[n-1], X)
+      copyto!(occupied(A,n-1), X)
     elseif n ∈ axes(A,1)
-      copyto!(A.unoccupied[n], X)
+      copyto!(unoccupied(A,n), X)
     else
       throw(BoundsError(A, (n-1:n,:,n)))
     end
   end
 end
 
-@propagate_inbounds function Base.copyto!(dest::SparseCore{T,N,d}, src::SparseCore{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function Base.copyto!(dest::AbstractCore{T,N,d}, src::AbstractCore{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
-    @assert dest.parent.k == src.k
-    @assert dest.row_ranks == src.row_ranks && dest.col_ranks == src.col_ranks
+    @assert site(src) == site(dest)
+    @assert row_ranks(dest) == row_ranks(src) && col_ranks(dest) == col_ranks(src)
   end
-  for (a,b) in zip(dest.unoccupied, src.unoccupied)
-    copyto!(a,b)
+  for l  in axes(src,1) ∩ axes(src,3)
+    copyto!(unoccupied(dest,l),unoccupied(src,l))
   end
-  for (a,b) in zip(dest.occupied, src.occupied)
-    copyto!(a,b)
+  for l in axes(src,1) ∩ (axes(src,3).-1)
+    copyto!(occupied(dest,l),occupied(src,l))
   end
   return dest
 end
@@ -355,12 +326,12 @@ function Base.show(io::IO, ::MIME"text/plain", A::SparseCore{T,N,d}) where {T<:N
     str = "SparseCore{$T,$N,$d} with $(A.m)x2x$(A.n) block shape"
   else
     # Manage some formatting and padding
-    strr = ["r[$(qn)]=$(A.row_ranks[qn])" for qn in axes(A,1)]
+    strr = ["r[$(qn)]=$(row_ranks(A)[qn])" for qn in axes(A,1)]
     len = max(length.(strr)...)
     padr = len .- length.(strr)
     strr_rows = ["$(s)"*" "^(pad+len+3)          for (s,pad) in zip(strr, padr)]
 
-    strr = ["r[$(qn)]=$(A.col_ranks[qn])" for qn in axes(A,3)]
+    strr = ["r[$(qn)]=$(col_ranks(A)[qn])" for qn in axes(A,3)]
     len = max(length.(strr)...)
     padr = len .- length.(strr)
     strr_cols = ["$(s)"*" "^(pad+len+3)          for (s,pad) in zip(strr, padr)]
@@ -375,8 +346,8 @@ end
 function Base.show(io::IO, A::SparseCore)
 
     (size(A,1) == 0 || size(A,3) == 0) && return show(io, MIME("text/plain"), A)
-    row_str = [" $(qn)‹$(A.row_ranks[qn]) " for qn in axes(A,1)]
-    col_str = [" $(qn)‹$(A.col_ranks[qn]) " for qn in axes(A,3)]
+    row_str = [" $(qn)‹$(row_ranks(A)[qn]) " for qn in axes(A,1)]
+    col_str = [" $(qn)‹$(col_ranks(A)[qn]) " for qn in axes(A,3)]
 
     rw = maximum(length.(row_str))
     cw = maximum(length.(col_str))
@@ -408,7 +379,7 @@ function Base.show(io::IO, A::SparseCore)
     for (j,n) in enumerate(axes(A,1))
       if n ∈ axes(A,3)
         i = findfirst(isequal(n), OffsetArrays.no_offset_view(axes(A,3)))
-        if (A.row_ranks[n] > 0) && (A.col_ranks[n] > 0)
+        if (row_rank(A,n) > 0) && (col_rank(A,n) > 0)
           Grid[rw+1+(cw+1)*(i-1).+(1:cw),2j]   .= collect(cpad('○',cw))
         end
         if n+1 ∈ axes(A,3)
@@ -426,7 +397,7 @@ function Base.show(io::IO, A::SparseCore)
       end
       if n+1 ∈ axes(A,3)
         i = findfirst(isequal(n+1), OffsetArrays.no_offset_view(axes(A,3)))
-        if (A.row_ranks[n] > 0) && (A.col_ranks[n+1] > 0)
+        if (row_rank(A,n) > 0) && (col_ranks(A)[n+1] > 0)
           Grid[rw+1+(cw+1)*(i-1).+(1:cw),2j]   .= collect(cpad('●',cw))
         end
         if n+1 ∈ axes(A,1)
@@ -455,59 +426,82 @@ function Base.summary(A::SparseCore{T,N,d}) where {T<:Number,N,d}
   return string("[$(axes(A,1)[begin]):$(axes(A,1)[end])]x$(size(A,2))x[$(axes(A,3)[begin]):$(axes(A,3)[end])] SparseCore{$(T),$(N),$(d)})")
 end
 
-struct AdjointSparseCore{T<:Number,N,d,S<:AbstractMatrix{T}}
-  parent::SparseCore{T,N,d,S}
+
+struct AdjointCore{T<:Number,N,d,C<:AbstractCore{T,N,d}} <: AbstractAdjointCore{T,N,d}
+  parent::C
 end
 
-@inline function LinearAlgebra.adjoint(A::SparseCore{T,N,d,S}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
-  return AdjointSparseCore{T,N,d,S}(A)
+@inline function LinearAlgebra.adjoint(A::C) where {T<:Number,N,d,C<:AbstractCore{T,N,d}}
+  return AdjointCore{T,N,d,C}(A)
 end
 
-@inline function LinearAlgebra.adjoint(A::AdjointSparseCore)
+@inline function LinearAlgebra.adjoint(A::AdjointCore)
   return parent(A)
 end
 
-@inline function Base.parent(A::AdjointSparseCore)
+@inline function Base.parent(A::AdjointCore)
   return A.parent
 end
 
-@inline function Base.size(A::AdjointSparseCore)
+@inline function Base.size(A::AdjointCore)
   return reverse(size(parent(A)))
 end
 
-@inline function Base.size(A::AdjointSparseCore, i)
+@inline function Base.size(A::AdjointCore, i)
   return size(A)[i]
 end
 
-@inline function Base.length(A::AdjointSparseCore)
+@inline function Base.length(A::AdjointCore)
   return length(parent(A))
 end
 
-@inline function Base.axes(A::AdjointSparseCore)
+@inline function Base.axes(A::AdjointCore)
   return reverse(axes(parent(A)))
 end
 
-@inline function Base.axes(A::AdjointSparseCore, i)
+@inline function Base.axes(A::AdjointCore, i)
   return axes(A)[i]
 end
 
-@inline function site(A::AdjointSparseCore)
+@inline function site(A::AdjointCore)
   return site(parent(A))
 end
 
-@inline @propagate_inbounds function Base.getindex(A::AdjointSparseCore, I, J)
+@inline function unoccupied(A::AdjointCore, r::Int)
+  return adjoint(unoccupied(parent(A), r))
+end
+
+@inline function occupied(A::AdjointCore, r::Int)
+  return adjoint(occupied(parent(A), r-1))
+end
+
+@inline function row_ranks(A::AdjointCore)
+  return col_ranks(parent(A))
+end
+@inline function row_rank(A::AdjointCore, r::Int)
+  return col_rank(parent(A),r)
+end
+
+@inline function col_ranks(A::AdjointCore)
+  return row_ranks(parent(A))
+end
+@inline function col_rank(A::AdjointCore, l::Int)
+  return row_ranks(parent(A), l)
+end
+
+@inline @propagate_inbounds function Base.getindex(A::AdjointCore, I, J)
   return adjoint(parent(A)[J,I])
 end
 
 @propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, b::Number) where {T<:Number,N,d}
-  @boundscheck @assert C.row_ranks == A.row_ranks
-  @boundscheck @assert C.col_ranks == A.col_ranks
+  @boundscheck @assert row_ranks(C) == row_ranks(A)
+  @boundscheck @assert col_ranks(C) == col_ranks(A)
 
-  for n in axes(A.unoccupied,1)
-    mul!(C.unoccupied[n], T(b), A.unoccupied[n])
+  for n in axes(unoccupied(A),1)
+    mul!(unoccupied(C,n), T(b), unoccupied(A,n))
   end
-  for n in axes(A.occupied,1)
-    mul!(C.occupied[n], T(b), A.occupied[n])
+  for n in axes(occupied(A),1)
+    mul!(occupied(C,n), T(b), occupied(A,n))
   end
   return C
 end
@@ -531,11 +525,11 @@ function Base.:-(A::SparseCore)
 end
 
 @propagate_inbounds function LinearAlgebra.lmul!(a::Number, B::SparseCore{T,N,d}) where {T<:Number,N,d}
-  for n in axes(B.unoccupied,1)
-    lmul!(T(a), B.unoccupied[n])
+  for n in axes(unoccupied(B),1)
+    lmul!(T(a), unoccupied(B,n))
   end
-  for n in axes(B.occupied,1)
-    lmul!(T(a), B.occupied[n])
+  for n in axes(occupied(B),1)
+    lmul!(T(a), occupied(B,n))
   end
   return B
 end
@@ -547,27 +541,27 @@ end
 @propagate_inbounds function LinearAlgebra.lmul!(A::AbstractMatrix{T}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
     @assert site(B) == 1
-    @assert size(A,1) == size(A,2) == B.row_ranks[0]
+    @assert size(A,1) == size(A,2) == row_rank(B,0)
   end
 
-  for n in axes(B.unoccupied, 1)
-    lmul!(A, B.unoccupied[n])
+  for n in axes(unoccupied(B), 1)
+    lmul!(A, unoccupied(B,n))
   end
-  for n in axes(B.occupied, 1)
-    lmul!(A, B.occupied[n])
+  for n in axes(occupied(B), 1)
+    lmul!(A, occupied(B,n))
   end
   return B
 end
 
 @propagate_inbounds function LinearAlgebra.rmul!(A::SparseCore{T,N,d}, B::Mat) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @assert site(A) == d
-  @assert A.col_ranks[N] = size(B,1) == size(B,2)
+  @assert col_ranks(A)[N] = size(B,1) == size(B,2)
 
-  for n in axes(A.unoccupied, 1)
-    rmul!(A.unoccupied[n], B)
+  for n in axes(unoccupied(A), 1)
+    rmul!(unoccupied(A,n), B)
   end
-  for n in axes(A.occupied, 1)
-    rmul!(A.occupied[n], B)
+  for n in axes(occupied(A), 1)
+    rmul!(occupied(A,n), B)
   end
   return A
 end
@@ -575,13 +569,12 @@ end
 @propagate_inbounds function LinearAlgebra.lmul!(A::Frame{T,N,d,Mat}, B::SparseCore{T,N,d}) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   @boundscheck begin
     site(A) == site(B) && axes(A,1) == axes(B,1) || throw(DimensionMismatch("Axes mismatch between matrices $(summary(axis(A,1))) and core row indices $(summary(axis(B,1)))"))
-    @assert A.row_ranks == A.col_ranks == B.row_ranks
+    @assert row_ranks(A) == col_ranks(A) == row_ranks(B)
   end
 
   for n in axes(B,1), m in axes(B,3) ∩ (n:n+1)
     lmul!(A[n], B[n,m-n+1,m])
   end
-
   return B
 end
 
@@ -589,14 +582,13 @@ end
   @boundscheck begin
     axes(A,3) == axes(B,1)|| throw(DimensionMismatch("Axes mismatch between core column indices $(summary(axis(B,3))) and matrices $(summary(axis(A,1)))"))
     for n in axes(A,3)
-      @assert A.col_ranks[n] == size(B[n],1) == size(B[n],2)
+      @assert col_rank(A,n) == size(B[n],1) == size(B[n],2)
     end
   end
 
   for n in axes(A,3), m in axes(A,1) ∩ (n-1:n)
     rmul!(A[m,n-m+1,n], B[n])
   end
-
   return A
 end
 
@@ -611,16 +603,15 @@ C =   A
 @propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::Frame{T,N,d,M}, B::SparseCore{T,N,d}, α::Number=1, β::Number=0) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck begin
     @assert site(A) == site(B)
-    @assert C.row_ranks == A.row_ranks
-    @assert A.col_ranks == B.row_ranks
-    @assert C.col_ranks == B.col_ranks
+    @assert row_ranks(C) == row_ranks(A)
+    @assert col_ranks(A) == row_ranks(B)
+    @assert col_ranks(C) == col_ranks(B)
   end
-
-  for n in axes(C.unoccupied,1)
-    mul!(C.unoccupied[n], A.blocks[n], B.unoccupied[n], α, β)
+  for n in axes(unoccupied(C),1)
+    mul!(unoccupied(C,n), A.blocks[n], unoccupied(B,n), α, β)
   end
-  for n in axes(C.occupied,1)
-    mul!(C.occupied[n], A.blocks[n], B.occupied[n], α, β)
+  for n in axes(occupied(C),1)
+    mul!(occupied(C,n), A.blocks[n], occupied(B,n), α, β)
   end
   return C
 end
@@ -637,41 +628,41 @@ C =         B
 @propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::Frame{T,N,d,M}, α::Number=1, β::Number=0) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck begin
     @assert site(A)+1 == site(B)
-    @assert C.row_ranks == A.row_ranks
-    @assert A.col_ranks == B.row_ranks
-    @assert C.col_ranks == B.col_ranks
+    @assert row_ranks(C) == row_ranks(A)
+    @assert col_ranks(A) == row_ranks(B)
+    @assert col_ranks(C) == col_ranks(B)
   end
-  for n in axes(C.unoccupied,1)
-    mul!(C.unoccupied[n], A.unoccupied[n], B.blocks[n], α, β)
+  for n in axes(unoccupied(C),1)
+    mul!(unoccupied(C,n), unoccupied(A,n), B.blocks[n], α, β)
   end
-  for n in axes(C.occupied,1)
-    mul!(C.occupied[n], A.occupied[n], B.blocks[n+1], α, β)
+  for n in axes(occupied(C),1)
+    mul!(occupied(C,n), occupied(A,n), B.blocks[n+1], α, β)
   end
   return C
 end
 
 """
-LinearAlgebra.mul!(C::AdjointSparseCore, A::Frame, B::AdjointSparseCore, α=1, β=0)
+LinearAlgebra.mul!(C::AdjointCore, A::Frame, B::AdjointCore, α=1, β=0)
     -- --A--
     |    |   
 C = B 
     | 
     --
 """
-@propagate_inbounds function LinearAlgebra.mul!(C::AdjointSparseCore{T,N,d}, A::AdjointSparseCore{T,N,d}, B::Frame{T,N,d,Mat}, α::Number=1, β::Number=0) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::AdjointCore{T,N,d}, A::AdjointCore{T,N,d}, B::Frame{T,N,d,Mat}, α::Number=1, β::Number=0) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   tA = parent(A)
   tC = parent(C)
   @boundscheck begin
     @assert site(A) == site(B) == site(C)
-    @assert tC.row_ranks == B.col_ranks
-    @assert B.row_ranks == tA.row_ranks
-    @assert tC.col_ranks == tA.col_ranks
+    @assert row_ranks(tC) == col_ranks(B)
+    @assert row_ranks(B) == row_ranks(tA)
+    @assert col_ranks(tC) == col_ranks(tA)
   end
-  for n in axes(tC.unoccupied,1)
-    mul!(tC.unoccupied[n], adjoint(B.blocks[n]), tA.unoccupied[n], α, β)
+  for n in axes(unoccupied(tC),1)
+    mul!(unoccupied(tC,n), adjoint(block(B,n)), unoccupied(tA,n), α, β)
   end
-  for n in axes(tC.occupied,1)
-    mul!(tC.occupied[n], adjoint(B.blocks[n]), tA.occupied[n], α, β)
+  for n in axes(occupied(tC),1)
+    mul!(occupied(tC,n), adjoint(block(B,n)), occupied(tA,n), α, β)
   end
   return C
 end
@@ -684,20 +675,20 @@ C =      A
          |
         --
 """
-@propagate_inbounds function LinearAlgebra.mul!(C::AdjointSparseCore{T,N,d}, A::Frame{T,N,d,M}, B::AdjointSparseCore{T,N,d}, α::Number=1, β::Number=0) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::AdjointCore{T,N,d}, A::Frame{T,N,d,M}, B::AdjointCore{T,N,d}, α::Number=1, β::Number=0) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   tB = parent(B)
   tC = parent(C)
   @boundscheck begin
     @assert site(A)-1 == site(B) == site(C)
-    @assert tC.row_ranks == tB.row_ranks
-    @assert tB.col_ranks == A.col_ranks
-    @assert tC.col_ranks == A.row_ranks
+    @assert row_ranks(tC) == row_ranks(tB)
+    @assert col_ranks(tB) == col_ranks(A)
+    @assert col_ranks(tC) == row_ranks(A)
   end
-  for n in axes(tC.unoccupied,1)
-    mul!(tC.unoccupied[n], tB.unoccupied[n], adjoint(A.blocks[n]), α, β)
+  for n in axes(unoccupied(tC),1)
+    mul!(unoccupied(tC,n), unoccupied(tB,n), adjoint(block(A,n  )), α, β)
   end
-  for n in axes(tC.occupied,1)
-    mul!(tC.occupied[n], tB.occupied[n], adjoint(A.blocks[n+1]), α, β)
+  for n in axes(occupied(tC),1)
+    mul!(occupied(tC,n),   occupied(tB,n),   adjoint(block(A,n+1)), α, β)
   end
   return C
 end
@@ -711,22 +702,22 @@ C =  |
      |   |
      ----B--
 """
-@propagate_inbounds function LinearAlgebra.mul!(C::Frame{T,N,d,Mat}, A::AdjointSparseCore{T,N,d}, B::SparseCore{T,N,d}, α::Number, β::Number) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::Frame{T,N,d,Mat}, A::AdjointCore{T,N,d}, B::SparseCore{T,N,d}, α::Number, β::Number) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   tA = parent(A)
   @boundscheck begin
     @assert site(A) == site(B) == site(C)-1
-    @assert C.row_ranks == tA.col_ranks
-    @assert B.row_ranks == tA.row_ranks
-    @assert C.col_ranks == B.col_ranks
+    @assert row_ranks(C) == col_ranks(tA)
+    @assert row_ranks(B) == row_ranks(tA)
+    @assert col_ranks(C) == col_ranks(B)
   end
   for n in axes(C,1)
-    if n ∈ axes(tA.unoccupied,1) && n-1 ∈ axes(tA.occupied,1)
-      mul!(C.blocks[n],adjoint(tA.unoccupied[n]),B.unoccupied[n],α,β)
-      mul!(C.blocks[n],adjoint(tA.occupied[n-1]),B.occupied[n-1],α,1)
-    elseif n ∈ axes(tA.unoccupied,1)
-      mul!(C.blocks[n],adjoint(tA.unoccupied[n]),B.unoccupied[n],α,β)
-    else #if n-1 ∈ axes(A.occupied,1)
-      mul!(C.blocks[n],adjoint(tA.occupied[n-1]),B.occupied[n-1],α,β)
+    if n ∈ axes(unoccupied(tA),1) && n-1 ∈ axes(occupied(tA),1)
+      mul!(block(C,n),adjoint(unoccupied(tA,n)),unoccupied(B,n),α,β)
+      mul!(block(C,n),adjoint(occupied(tA,n-1)),occupied(B,n-1),α,1)
+    elseif n ∈ axes(unoccupied(tA),1)
+      mul!(block(C,n),adjoint(unoccupied(tA,n)),unoccupied(B,n),α,β)
+    else #if n-1 ∈ axes(occupied(A),1)
+      mul!(block(C,n),adjoint(occupied(tA,n-1)),occupied(B,n-1),α,β)
     end
   end
   return C
@@ -740,22 +731,22 @@ C =        |
        |   |
      --A----
 """
-@propagate_inbounds function LinearAlgebra.mul!(C::Frame{T,N,d,Mat}, A::SparseCore{T,N,d}, B::AdjointSparseCore{T,N,d}, α::Number, β::Number) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
+@propagate_inbounds function LinearAlgebra.mul!(C::Frame{T,N,d,Mat}, A::SparseCore{T,N,d}, B::AdjointCore{T,N,d}, α::Number, β::Number) where {T<:Number,N,d,Mat<:AbstractMatrix{T}}
   tB = parent(B)
   @boundscheck begin
     @assert site(C) == site(B) == site(A)
-    @assert C.row_ranks == A.row_ranks
-    @assert A.col_ranks == tB.col_ranks
-    @assert C.col_ranks == tB.row_ranks
+    @assert row_ranks(C) == row_ranks(A)
+    @assert col_ranks(A) == col_ranks(tB)
+    @assert col_ranks(C) == row_ranks(tB)
   end
   for n in axes(C,1)
-    if n ∈ axes(A.unoccupied,1) && n ∈ axes(A.occupied,1)
-      mul!(C.blocks[n],A.unoccupied[n],adjoint(tB.unoccupied[n]),α,β)
-      mul!(C.blocks[n],A.occupied[n],  adjoint(tB.occupied[n]),  α,1)
-    elseif n ∈ axes(A.unoccupied,1)
-      mul!(C.blocks[n],A.unoccupied[n],adjoint(tB.unoccupied[n]),α,β)
-    else #if n ∈ axes(A.occupied,1)
-      mul!(C.blocks[n],A.occupied[n],  adjoint(tB.occupied[n]),  α,β)
+    if n ∈ axes(unoccupied(A),1) && n ∈ axes(occupied(A),1)
+      mul!(block(C,n),unoccupied(A,n),adjoint(unoccupied(tB,n)),α,β)
+      mul!(block(C,n),occupied(  A,n),adjoint(occupied(  tB,n)),α,1)
+    elseif n ∈ axes(unoccupied(A),1)
+      mul!(block(C,n),unoccupied(A,n),adjoint(unoccupied(tB,n)),α,β)
+    else #if n ∈ axes(occupied(A),1)
+      mul!(block(C,n),occupied(  A,n),adjoint(occupied(  tB,n)),α,β)
     end
   end
   return C
@@ -764,14 +755,14 @@ end
 @propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::M, B::SparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck begin
     @assert site(C) == site(B) == 1
-    @assert C.row_ranks == B.row_ranks && C.col_ranks == B.col_ranks
-    @assert size(A,1) == size(A,2) == B.row_ranks[0]
+    @assert row_ranks(C) == row_ranks(B) && col_ranks(C) == col_ranks(B)
+    @assert size(A,1) == size(A,2) == row_rank(B,0)
   end
 
-  for (b,c) in zip(B.unoccupied, C.unoccupied)
+  for (b,c) in zip(unoccupied(B), unoccupied(C))
     mul!(c,A,b)
   end
-  for (b,c) in zip(B.occupied, C.occupied)
+  for (b,c) in zip(occupied(B), occupied(C))
     mul!(c,A,b)
   end
 
@@ -781,53 +772,53 @@ end
 @propagate_inbounds function LinearAlgebra.mul!(C::SparseCore{T,N,d}, A::SparseCore{T,N,d}, B::M, α::Number=1, β::Number=0) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck begin
     @assert site(A) == site(C) == d
-    @assert A.col_ranks[N] == size(B,1)
-    @assert C.col_ranks[N] == size(B,2)
-    @assert C.row_ranks == A.row_ranks
+    @assert col_ranks(A)[N] == size(B,1)
+    @assert col_ranks(C)[N] == size(B,2)
+    @assert row_ranks(C) == row_ranks(A)
   end
 
-  for n in axes(A.unoccupied, 1)
-    mul!(C.unoccupied[n], A.unoccupied[n], B, α, β)
+  for n in axes(unoccupied(A), 1)
+    mul!(unoccupied(C,n), unoccupied(A,n), B, α, β)
   end
-  for n in axes(A.occupied, 1)
-    mul!(C.occupied[n], A.occupied[n], B, α, β)
+  for n in axes(occupied(A), 1)
+    mul!(occupied(C,n), occupied(A,n), B, α, β)
   end
 
   return C
 end
 
-function Base.:*(A::Frame{T,N,d,M}, B::SparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  return mul!(SparseCore{T,N,d}(site(B), A.row_ranks, B.col_ranks), A, B)
+function Base.:*(A::Frame{T,N,d,M}, B::AbstractCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  return mul!(SparseCore{T,N,d}(site(B), row_ranks(A), col_ranks(B)), A, B)
 end
 
-function Base.:*(A::SparseCore{T,N,d}, B::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  return mul!(SparseCore{T,N,d}(site(A), A.row_ranks, B.col_ranks), A, B)
+function Base.:*(A::AbstractCore{T,N,d}, B::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  return mul!(SparseCore{T,N,d}(site(A), row_ranks(A), col_ranks(B)), A, B)
 end
 
-function Base.:*(A::AdjointSparseCore{T,N,d}, B::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  return mul!(adjoint(SparseCore{T,N,d}(site(A), B.col_ranks, parent(A).col_ranks)), A, B)
+function Base.:*(A::AdjointCore{T,N,d}, B::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  return mul!(adjoint(SparseCore{T,N,d}(site(A), col_ranks(B), row_ranks(A))), A, B)
 end
 
-function Base.:*(A::Frame{T,N,d,M}, B::AdjointSparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  return mul!(adjoint(SparseCore{T,N,d}(site(B), parent(B).row_ranks, A.row_ranks)), A, B)
+function Base.:*(A::Frame{T,N,d,M}, B::AdjointCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  return mul!(adjoint(SparseCore{T,N,d}(site(B), col_ranks(B), row_ranks(A))), A, B)
 end
 
-function Base.:*(A::AdjointSparseCore{T,N,d}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
-  return mul!(Frame{T,N,d}(site(A)+1,parent(A).col_ranks,B.col_ranks), A, B)
+function Base.:*(A::AdjointCore{T,N,d}, B::AbstractCore{T,N,d}) where {T<:Number,N,d}
+  return mul!(Frame{T,N,d}(site(A)+1,row_ranks(A),col_ranks(B)), A, B)
 end
 
-function Base.:*(A::SparseCore{T,N,d}, B::AdjointSparseCore{T,N,d}) where {T<:Number,N,d}
-  return mul!(Frame{T,N,d}(site(A), A.row_ranks, parent(B).row_ranks), A, B)
+function Base.:*(A::AbstractCore{T,N,d}, B::AdjointCore{T,N,d}) where {T<:Number,N,d}
+  return mul!(Frame{T,N,d}(site(A),  row_ranks(A),col_ranks(B)), A, B)
 end
 
-function Base.:*(A::M, B::SparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  @boundscheck @assert site(B) == 1 && size(A,1) == size(A,2) == B.row_ranks[0]
+function Base.:*(A::M, B::AbstractCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  @boundscheck @assert site(B) == 1 && size(A,1) == size(A,2) == row_rank(B,0)
   return mul!(similar(B), A, B)
 end
 
-function Base.:*(A::SparseCore{T,N,d}, B::M) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+function Base.:*(A::AbstractCore{T,N,d}, B::M) where {T<:Number,N,d,M<:AbstractMatrix{T}}
   @boundscheck @assert site(A) == d
-  return mul!(SparseCore{T,N,d}(d,A.row_ranks, [size(B,2) for n in occupation_qn(N,d,d)]), A, B)
+  return mul!(SparseCore{T,N,d}(d,row_ranks(A), [size(B,2) for n in occupation_qn(N,d,d)]), A, B)
 end
 
 
@@ -836,61 +827,61 @@ function ⊕(A::SparseCore{T,N,d}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
   k = site(A)
   if d>1
     if k==1
-      @boundscheck @assert A.row_ranks == B.row_ranks
-      row_ranks = A.row_ranks
-      col_ranks = A.col_ranks + B.col_ranks
+      @boundscheck @assert row_ranks(A) == row_ranks(B)
+      rowranks = row_ranks(A)
+      colranks = col_ranks(A) + col_ranks(B)
     elseif 1<k<d
-      row_ranks = A.row_ranks + B.row_ranks
-      col_ranks = A.col_ranks + B.col_ranks
+      rowranks = row_ranks(A) + row_ranks(B)
+      colranks = col_ranks(A) + col_ranks(B)
     else # k == d
-      @boundscheck @assert A.col_ranks == B.col_ranks
-      row_ranks = A.row_ranks + B.row_ranks
-      col_ranks = A.col_ranks
+      @boundscheck @assert col_ranks(A) == col_ranks(B)
+      rowranks = row_ranks(A) + row_ranks(B)
+      colranks = col_ranks(A)
     end
   else #d==1
-    @boundscheck @assert A.row_ranks == B.row_ranks
-    @boundscheck @assert A.col_ranks == B.col_ranks
-    row_ranks = A.row_ranks
-    col_ranks = A.col_ranks
+    @boundscheck @assert row_ranks(A) == row_ranks(B)
+    @boundscheck @assert col_ranks(A) == col_ranks(B)
+    rowranks = row_ranks(A)
+    colranks = col_ranks(A)
   end
-  C = SparseCore{T,N,d}(k,row_ranks,col_ranks)
+  C = SparseCore{T,N,d}(k,rowranks,colranks)
 
   if d>1
     if k==1
-      for (a,b,c) in zip(A.unoccupied, B.unoccupied, C.unoccupied)
+      for (a,b,c) in zip(unoccupied(A), unoccupied(B), unoccupied(C))
         copyto!(view(c,axes(a,1), axes(a,2))     , a)
         copyto!(view(c,axes(a,1), size(a,2).+axes(b,2)), b)
       end
-      for (a,b,c) in zip(A.occupied, B.occupied, C.occupied)
+      for (a,b,c) in zip(occupied(A), occupied(B), occupied(C))
         copyto!(view(c, axes(a,1), axes(a,2))     , a)
         copyto!(view(c, axes(a,1), size(a,2).+axes(b,2)), b)
       end
 
     elseif 1<k<d
-      for (a,b,c) in zip(A.unoccupied, B.unoccupied, C.unoccupied)
+      for (a,b,c) in zip(unoccupied(A), unoccupied(B), unoccupied(C))
         copyto!(view(c, axes(a,1)           , axes(a,2)           ), a)
         copyto!(view(c, size(a,1).+axes(b,1), size(a,2).+axes(b,2)), b)
       end
-      for (a,b,c) in zip(A.occupied, B.occupied, C.occupied)
+      for (a,b,c) in zip(occupied(A), occupied(B), occupied(C))
         copyto!(view(c, axes(a,1)           , axes(a,2)           ), a)
         copyto!(view(c, size(a,1).+axes(b,1), size(a,2).+axes(b,2)), b)
       end
     else # k == d
-      for (a,b,c) in zip(A.unoccupied, B.unoccupied, C.unoccupied)
+      for (a,b,c) in zip(unoccupied(A), unoccupied(B), unoccupied(C))
         copyto!(view(c, axes(a,1)           , axes(a,2)), a)
         copyto!(view(c, size(a,1).+axes(b,1), axes(a,2)), b)
       end
-      for (a,b,c) in zip(A.occupied, B.occupied, C.occupied)
+      for (a,b,c) in zip(occupied(A), occupied(B), occupied(C))
         copyto!(view(c, axes(a,1)           , axes(a,2)), a)
         copyto!(view(c, size(a,1).+axes(b,1), axes(a,2)), b)
       end
     end
   else #d==1
-    for (a,b,c) in zip(A.unoccupied, B.unoccupied, C.unoccupied)
+    for (a,b,c) in zip(unoccupied(A), unoccupied(B), unoccupied(C))
       copyto!(c, a)
       axpy!(T(1),b,c)
     end
-    for (a,b,c) in zip(A.occupied, B.occupied, C.occupied)
+    for (a,b,c) in zip(occupied(A), occupied(B), occupied(C))
       copyto!(c, a)
       axpy!(T(1),b,c)
     end
@@ -900,39 +891,39 @@ function ⊕(A::SparseCore{T,N,d}, B::SparseCore{T,N,d}) where {T<:Number,N,d}
 end
 
 @propagate_inbounds function LinearAlgebra.axpy!(α, v::SparseCore{T,N,d}, w::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @boundscheck @assert v.row_ranks == w.row_ranks
-  @boundscheck @assert v.col_ranks == w.col_ranks
+  @boundscheck @assert row_ranks(v) == row_ranks(w)
+  @boundscheck @assert col_ranks(v) == col_ranks(w)
 
-  axpy!.(α, v.unoccupied, w.unoccupied)
-  axpy!.(α, v.occupied, w.occupied)
+  axpy!.(α, unoccupied(v), unoccupied(w))
+  axpy!.(α, occupied(v), occupied(w))
   return w
 end
 
 @propagate_inbounds function LinearAlgebra.axpby!(α, v::SparseCore{T,N,d}, β, w::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @boundscheck @assert v.row_ranks == w.row_ranks
-  @boundscheck @assert v.col_ranks == w.col_ranks
+  @boundscheck @assert row_ranks(v) == row_ranks(w)
+  @boundscheck @assert col_ranks(v) == col_ranks(w)
 
-  axpby!.(α, v.unoccupied, β, w.unoccupied)
-  axpby!.(α, v.occupied, β, w.occupied)
+  axpby!.(α, unoccupied(v), β, unoccupied(w))
+  axpby!.(α, occupied(v), β, occupied(w))
   return w
 end
 
 @propagate_inbounds function LinearAlgebra.dot(V::SparseCore{T,N,d}, W::SparseCore{T,N,d}) where {T<:Number,N,d}
-  @boundscheck @assert V.row_ranks == W.row_ranks
-  @boundscheck @assert V.col_ranks == W.col_ranks
+  @boundscheck @assert row_ranks(V) == row_ranks(W)
+  @boundscheck @assert col_ranks(V) == col_ranks(W)
 
   s = T(0)
-  for (v,w) in zip(V.unoccupied, W.unoccupied)
+  for (v,w) in zip(unoccupied(V), unoccupied(W))
     s += dot(v,w)
   end
-  for (v,w) in zip(V.occupied, W.occupied)
+  for (v,w) in zip(occupied(V), occupied(W))
     s += dot(v,w)
   end
   return s
 end
 
 function Base.abs2(V::SparseCore{T,N,d}) where {T<:Number,N,d}
-  return sum(block->sum(abs2, block), V.unoccupied) + sum(block->sum(abs2, block), V.occupied)
+  return sum(block->sum(abs2, block), unoccupied(V)) + sum(block->sum(abs2, block), occupied(V))
 end
 
 function LinearAlgebra.norm(V::SparseCore{T,N,d}) where {T<:Number,N,d}
@@ -943,61 +934,61 @@ function ⊕(A::SparseCore{T,N,d}, b::Number) where {T<:Number,N,d}
 
   if d>1
     if k==1
-      row_ranks = A.row_ranks
-      col_ranks = A.col_ranks .+ 1
+      rowranks = row_ranks(A)
+      colranks = col_ranks(A) .+ 1
     elseif 1<k<d
-      row_ranks = A.row_ranks .+ 1
-      col_ranks = A.col_ranks .+ 1
+      rowranks = row_ranks(A) .+ 1
+      colranks = col_ranks(A) .+ 1
     else # k == d
-      row_ranks = A.row_ranks .+ 1
-      col_ranks = A.col_ranks
+      rowranks = row_ranks(A) .+ 1
+      colranks = col_ranks(A)
     end
   else #d==1
-    row_ranks = A.row_ranks
-    col_ranks = A.col_ranks
+    rowranks = row_ranks(A)
+    colranks = col_ranks(A)
   end
-  C = SparseCore{T,N,d}(site(A),row_ranks,col_ranks)
+  C = SparseCore{T,N,d}(site(A),rowranks,colranks)
 
   if d>1
     if k==1
-      for (a,c) in zip(A.unoccupied, C.unoccupied)
+      for (a,c) in zip(unoccupied(A), unoccupied(C))
         copyto!(view(c, axes(a,1), axes(a,2)  ), a   )
         fill!(  view(c, axes(a,1), size(a,2)+1), T(b))
       end
-      for (a,c) in zip(A.occupied, C.occupied)
+      for (a,c) in zip(occupied(A), occupied(C))
         copyto!(view(c, axes(a,1), axes(a,2)  ), a   )
         fill!(  view(c, axes(a,1), size(a,2)+1), T(b))
       end
 
     elseif 1<k<d
-      for (a,c) in zip(A.unoccupied, C.unoccupied)
+      for (a,c) in zip(unoccupied(A), unoccupied(C))
         copyto!(view(c, axes(a,1)  , axes(a,2)  ), a   )
         fill!(  view(c, axes(a,1)  , size(a,2)+1), T(0))
         fill!(  view(c, size(a,1)+1, axes(a,2)  ), T(0))
         fill!(  view(c, size(A,1)+1, size(A,2)+1), T(b))
       end
-      for (a,c) in zip(A.occupied, C.occupied)
+      for (a,c) in zip(occupied(A), occupied(C))
         copyto!(view(c, axes(a,1)  , axes(a,2)  ), a   )
         fill!(  view(c, axes(a,1)  , size(a,2)+1), T(0))
         fill!(  view(c, size(a,1)+1, axes(a,2)  ), T(0))
         fill!(  view(c, size(A,1)+1, size(A,2)+1), T(b))
       end
     else # k == d
-      for (a,c) in zip(A.unoccupied, C.unoccupied)
+      for (a,c) in zip(unoccupied(A), unoccupied(C))
         copyto!(view(c, axes(a,1)  , axes(a,2)), a   )
         fill!(  view(c, size(a,1)+1, axes(a,2)), T(b))
       end
-      for (a,c) in zip(A.occupied, C.occupied)
+      for (a,c) in zip(occupied(A), occupied(C))
         copyto!(view(c, axes(a,1)  , axes(a,2)), a   )
         fill!(  view(c, size(a,1)+1, axes(a,2)), T(b))
       end
     end
   else #d==1
-    for (a,c) in zip(A.unoccupied, C.unoccupied)
+    for (a,c) in zip(unoccupied(A), unoccupied(C))
       copyto!(c, a)
       axpy!(T(1),b,c)
     end
-    for (a,c) in zip(A.occupied, C.occupied)
+    for (a,c) in zip(occupied(A), occupied(C))
       copyto!(c, a)
       axpy!(T(1),b,c)
     end
@@ -1011,18 +1002,18 @@ end
 function ⊗(A::SparseCore{T,N,d},B::SparseCore{T,N,d}) where {T<:Number,N,d}
   @assert site(A) == site(B)
   k = site(A)
-  row_ranks = A.row_ranks .* B.row_ranks
-  col_ranks = A.col_ranks .* B.col_ranks
 
-  C = SparseCore{T,N,d}(k, row_ranks, col_ranks)
-  for (a,b,c) in zip(A.unoccupied, B.unoccupied, C.unoccupied)
+  C = SparseCore{T,N,d}(k, 
+                        row_ranks(A) .* row_ranks(B), 
+                        col_ranks(A) .* col_ranks(B))
+  for (a,b,c) in zip(unoccupied(A), unoccupied(B), unoccupied(C))
     c .= reshape( 
             reshape(a, (size(a,1),1,size(a,2),1)) .* 
             reshape(b, (1,size(b,1),1,size(b,2))),
             (size(a,1)*size(b,1),size(a,2)*size(b,2))
                 )
   end
-  for (a,b,c) in zip(A.occupied, B.occupied, C.occupied)
+  for (a,b,c) in zip(occupied(A), occupied(B), occupied(C))
     c .= reshape( 
                   reshape(a, (size(a,1),1,size(a,2),1)) .* 
                   reshape(b, (1,size(b,1),1,size(b,2))),
@@ -1034,35 +1025,35 @@ function ⊗(A::SparseCore{T,N,d},B::SparseCore{T,N,d}) where {T<:Number,N,d}
 end
 
 function LinearAlgebra.qr!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
-  R = [UpperTriangular(zeros(T,A.col_ranks[n],A.col_ranks[n])) for n in axes(A,3)]
+  R = [UpperTriangular(zeros(T,col_rank(A,n),col_rank(A,n))) for n in axes(A,3)]
 
   for n in axes(A,3)
     An = A[n,:vertical]
     if size(An,1)>0 && size(An,2)>0
       F = qr!(An)
 
-      r = sum(A.row_ranks[m] for m∈(n-1:n)∩axes(A,1))
-      rank = min(r, A.col_ranks[n])
+      r = sum(row_rank(A,m) for m∈(n-1:n)∩axes(A,1))
+      rank = min(r, col_rank(A,n))
       Q = Matrix(F.Q)
-      copyto!(R[n], 1:rank, 1:A.col_ranks[n], 
-              F.R,       1:rank, 1:A.col_ranks[n])
+      copyto!(R[n], 1:rank, 1:col_rank(A,n), 
+              F.R,       1:rank, 1:col_rank(A,n))
       
       # We make sure all ranks are the same, even if we have to introduce redundant zeros.
       if n-1 ∈ axes(A,1) && n ∈ axes(A,1)
-        copyto!( A.occupied[n-1], 1:A.row_ranks[n-1], 1:rank,
-                 Q,                    1:A.row_ranks[n-1], 1:rank)
-        fill!(  view(A.occupied[n-1], 1:A.row_ranks[n-1], rank+1:A.col_ranks[n]), T(0))
-        copyto!( A.unoccupied[n], 1:A.row_ranks[n], 1:rank,
-                 Q,                   (1:A.row_ranks[n]).+A.row_ranks[n-1],1:rank)
-        fill!(  view(A.unoccupied[n], 1:A.row_ranks[n], rank+1:A.col_ranks[n]), T(0))
+        copyto!( occupied(A,n-1), 1:row_rank(A,n-1), 1:rank,
+                 Q,                    1:row_rank(A,n-1), 1:rank)
+        fill!(  view(occupied(A,n-1), 1:row_rank(A,n-1), rank+1:col_rank(A,n)), T(0))
+        copyto!( unoccupied(A,n), 1:row_rank(A,n), 1:rank,
+                 Q,                   (1:row_rank(A,n)).+row_rank(A,n-1),1:rank)
+        fill!(  view(unoccupied(A,n), 1:row_rank(A,n), rank+1:col_rank(A,n)), T(0))
       elseif n-1 ∈ axes(A,1)
-        copyto!( A.occupied[n-1], 1:A.row_ranks[n-1], 1:rank,
-                 Q,                    1:A.row_ranks[n-1], 1:rank)
-        fill!(  view(A.occupied[n-1], 1:A.row_ranks[n-1], rank+1:A.col_ranks[n]), T(0))
+        copyto!( occupied(A,n-1), 1:row_rank(A,n-1), 1:rank,
+                 Q,                    1:row_rank(A,n-1), 1:rank)
+        fill!(  view(occupied(A,n-1), 1:row_rank(A,n-1), rank+1:col_rank(A,n)), T(0))
       elseif n ∈ axes(A,1)
-        copyto!( A.unoccupied[n], 1:A.row_ranks[n], 1:rank,
-                 Q,                    1:A.row_ranks[n], 1:rank)
-        fill!(  view(A.unoccupied[n], 1:A.row_ranks[n], rank+1:A.col_ranks[n]), T(0))
+        copyto!( unoccupied(A,n), 1:row_rank(A,n), 1:rank,
+                 Q,                    1:row_rank(A,n), 1:rank)
+        fill!(  view(unoccupied(A,n), 1:row_rank(A,n), rank+1:col_rank(A,n)), T(0))
       end
     end
   end
@@ -1071,35 +1062,35 @@ function LinearAlgebra.qr!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
 end
 
 function LinearAlgebra.lq!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
-  L = [LowerTriangular(zeros(T,A.row_ranks[n],A.row_ranks[n])) for n in axes(A,1)]
+  L = [LowerTriangular(zeros(T,row_rank(A,n),row_rank(A,n))) for n in axes(A,1)]
 
   for n in axes(A,1)
     An = A[n,:horizontal]
     if size(An,1) > 0 && size(An,2) > 0
       F = lq!(An)
 
-      r = sum(A.col_ranks[m] for m∈(n:n+1)∩axes(A,3))
-      rank = min(A.row_ranks[n],r)
+      r = sum(col_rank(A,m) for m∈(n:n+1)∩axes(A,3))
+      rank = min(row_rank(A,n),r)
       Q = Matrix(F.Q)
-      copyto!(L[n], 1:A.row_ranks[n], 1:rank,
-              F.L,       1:A.row_ranks[n], 1:rank)
+      copyto!(L[n], 1:row_rank(A,n), 1:rank,
+              F.L,       1:row_rank(A,n), 1:rank)
 
       # We make sure all ranks are the same, even if we have to introduce redundant zeros.
       if n ∈ axes(A,3) && n+1 ∈ axes(A,3)
-        copyto!(A.unoccupied[n], 1:rank, 1:A.col_ranks[n], 
-                Q,                    1:rank, 1:A.col_ranks[n])
-        fill!( view(A.unoccupied[n], rank+1:A.row_ranks[n], 1:A.col_ranks[n  ]), T(0))
-        copyto!(A.occupied[n], 1:rank, 1:A.col_ranks[n+1],  
-                Q,                  1:rank,(1:A.col_ranks[n+1]).+A.col_ranks[n])
-        fill!( view(A.occupied[n],   rank+1:A.row_ranks[n], 1:A.col_ranks[n+1]), T(0))
+        copyto!(unoccupied(A,n), 1:rank, 1:col_rank(A,n), 
+                Q,                    1:rank, 1:col_rank(A,n))
+        fill!( view(unoccupied(A,n), rank+1:row_rank(A,n), 1:col_ranks(A)[n  ]), T(0))
+        copyto!(occupied(A,n), 1:rank, 1:col_ranks(A)[n+1],  
+                Q,                  1:rank,(1:col_ranks(A)[n+1]).+col_rank(A,n))
+        fill!( view(occupied(A,n),   rank+1:row_rank(A,n), 1:col_ranks(A)[n+1]), T(0))
       elseif n ∈ axes(A,3)
-        copyto!(A.unoccupied[n], 1:rank, 1:A.col_ranks[n], 
-                Q,                    1:rank, 1:A.col_ranks[n])
-        fill!( view(A.unoccupied[n], rank+1:A.row_ranks[n], 1:A.col_ranks[n  ]), T(0))
+        copyto!(unoccupied(A,n), 1:rank, 1:col_rank(A,n), 
+                Q,                    1:rank, 1:col_rank(A,n))
+        fill!( view(unoccupied(A,n), rank+1:row_rank(A,n), 1:col_ranks(A)[n  ]), T(0))
       elseif n+1 ∈ axes(A,3)
-        copyto!(A.occupied[n], 1:rank, 1:A.col_ranks[n+1], 
-                Q,                  1:rank, 1:A.col_ranks[n+1])
-        fill!( view(A.occupied[n],   rank+1:A.row_ranks[n], 1:A.col_ranks[n+1]), T(0))
+        copyto!(occupied(A,n), 1:rank, 1:col_ranks(A)[n+1], 
+                Q,                  1:rank, 1:col_ranks(A)[n+1])
+        fill!( view(occupied(A,n),   rank+1:row_rank(A,n), 1:col_ranks(A)[n+1]), T(0))
       end
     end
   end
@@ -1143,7 +1134,7 @@ function qc!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
     Qblocks[n], C[n], col_ranks[n] = my_qc!(A[n,:vertical])
   end
 
-  Q = SparseCore{T,N,d}(site(A), A.row_ranks, col_ranks)
+  Q = SparseCore{T,N,d}(site(A), row_ranks(A), col_ranks)
   for n in col_qn
       Q[n,:vertical] = Qblocks[n]
   end
@@ -1167,7 +1158,7 @@ function cq!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
     Qblocks[n], C[n], row_ranks[n] = my_cq(A[n,:horizontal])
   end
 
-  Q = SparseCore{T,N,d}(site(A), row_ranks, A.col_ranks)
+  Q = SparseCore{T,N,d}(site(A), row_ranks, col_ranks(A))
   for n in row_qn
       Q[n,:horizontal] = Qblocks[n]
   end
@@ -1179,7 +1170,7 @@ function svd_horizontal(A::SparseCore{T,N,d}) where {T<:Number,N,d}
   S  = OffsetArray( Vector{Vector{T}}(undef, size(A,1)), axes(A,1))
   Vt = OffsetArray( Vector{Matrix{T}}(undef, size(A,1)), axes(A,1))
   for n in axes(A,1)
-    if A.row_ranks[n] > 0
+    if row_rank(A,n) > 0
       F = svd!(A[n,:horizontal])
       U[n] = F.U
       S[n] = F.S
@@ -1187,26 +1178,26 @@ function svd_horizontal(A::SparseCore{T,N,d}) where {T<:Number,N,d}
     else
       U[n] = zeros(T,0,0)
       S[n] = zeros(T,0)
-      Vt[n]= zeros(T,0,sum(A.col_ranks[m] for m in axes(A,3)∩(n:n+1)))
+      Vt[n]= zeros(T,0,sum(col_rank(A,m) for m in axes(A,3)∩(n:n+1)))
     end
   end
   return Frame{T,N,d}(site(A), U), Frame{T,N,d}(site(A), Diagonal.(S)), Vt
 end
 
 function svd_vertical(A::SparseCore{T,N,d}) where {T<:Number,N,d}
-  F  = [ A.row_ranks[n] > 0 ? [unpack_svd!(A[n, :horizontal])...] : [zeros(T,0,0),zeros(T,0),zeros(T,0,sum(A.col_ranks[m] for m in axes(A,3)∩(n:n+1)))] for n in axes(A,1)]
+  F  = [ row_rank(A,n) > 0 ? [unpack_svd!(A[n, :horizontal])...] : [zeros(T,0,0),zeros(T,0),zeros(T,0,sum(col_rank(A,m) for m in axes(A,3)∩(n:n+1)))] for n in axes(A,1)]
   
   U  = OffsetArray( Vector{Matrix{T}}(undef, size(A,3)), axes(A,3))
   S  = OffsetArray( Vector{Vector{T}}(undef, size(A,3)), axes(A,3))
   Vt = OffsetArray( Vector{Matrix{T}}(undef, size(A,3)), axes(A,3))
   for n in axes(A,3)
-    if A.col_ranks[n] > 0
+    if col_rank(A,n) > 0
       F = svd!(A[n,:vertical])
       U[n] = F.U
       S[n] = F.S
       Vt[n]= F.Vt
     else
-      U[n] = zeros(T,sum(A.row_ranks[m] for m in axes(A,1)∩(n-1:n)),0)
+      U[n] = zeros(T,sum(row_rank(A,m) for m in axes(A,1)∩(n-1:n)),0)
       S[n] = zeros(T,0)
       Vt[n]= zeros(T,0,0)
     end
@@ -1219,7 +1210,7 @@ function svd_horizontal!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
   S  = OffsetArray( Vector{Vector{T}}(undef, size(A,1)), axes(A,1))
   Vt = OffsetArray( Vector{Matrix{T}}(undef, size(A,1)), axes(A,1))
   for n in axes(A,1)
-    if A.row_ranks[n] > 0
+    if row_rank(A,n) > 0
       F = svd!(A[n,:horizontal])
       U[n] = F.U
       S[n] = F.S
@@ -1227,10 +1218,10 @@ function svd_horizontal!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
     else
       U[n] = zeros(T,0,0)
       S[n] = zeros(T,0)
-      Vt[n]= zeros(T,0,sum(A.col_ranks[m] for m in axes(A,3)∩(n:n+1)))
+      Vt[n]= zeros(T,0,sum(col_rank(A,m) for m in axes(A,3)∩(n:n+1)))
     end
   end
-  C = SparseCore{T,N,d}(site(A), length.(S), A.col_ranks)
+  C = SparseCore{T,N,d}(site(A), length.(S), col_ranks(A))
   for n in axes(C,1)
     C[n,:horizontal] = Vt[n]
   end
@@ -1238,24 +1229,24 @@ function svd_horizontal!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
 end
 
 function svd_vertical!(A::SparseCore{T,N,d}) where {T<:Number,N,d}
-  F  = [ A.row_ranks[n] > 0 ? [unpack_svd!(A[n, :horizontal])...] : [zeros(T,0,0),zeros(T,0),zeros(T,0,sum(A.col_ranks[m] for m in axes(A,3)∩(n:n+1)))] for n in axes(A,1)]
+  F  = [ row_rank(A,n) > 0 ? [unpack_svd!(A[n, :horizontal])...] : [zeros(T,0,0),zeros(T,0),zeros(T,0,sum(col_rank(A,m) for m in axes(A,3)∩(n:n+1)))] for n in axes(A,1)]
   
   U  = OffsetArray( Vector{Matrix{T}}(undef, size(A,3)), axes(A,3))
   S  = OffsetArray( Vector{Vector{T}}(undef, size(A,3)), axes(A,3))
   Vt = OffsetArray( Vector{Matrix{T}}(undef, size(A,3)), axes(A,3))
   for n in axes(A,3)
-    if A.col_ranks[n] > 0
+    if col_rank(A,n) > 0
       F = svd!(A[n,:vertical])
       U[n] = F.U
       S[n] = F.S
       Vt[n]= F.Vt
     else
-      U[n] = zeros(T,sum(A.row_ranks[m] for m in axes(A,1)∩(n-1:n)),0)
+      U[n] = zeros(T,sum(row_rank(A,m) for m in axes(A,1)∩(n-1:n)),0)
       S[n] = zeros(T,0)
       Vt[n]= zeros(T,0,0)
     end
   end
-  C = SparseCore{T,N,d}(site(A), A.row_ranks, length.(S))
+  C = SparseCore{T,N,d}(site(A), row_ranks(A), length.(S))
   for n in axes(C,3)
     C[n,:vertical] = U[n]
   end
@@ -1271,31 +1262,31 @@ function svdvals_vertical(A::SparseCore{T,N,d}, unfolding::Symbol) where {T<:Num
 end
 
 function reduce_ranks(A::SparseCore{T,N,d}, 
-                       row_ranks::OffsetVector{Int, Vector{Int}}, 
-                       col_ranks::OffsetVector{Int, Vector{Int}}) where {T<:Number,N,d}
+                       rowranks::OffsetVector{Int, Vector{Int}}, 
+                       colranks::OffsetVector{Int, Vector{Int}}) where {T<:Number,N,d}
   @boundscheck begin
-    @assert axes(row_ranks) == axes(A.row_ranks)
-    @assert axes(col_ranks) == axes(A.col_ranks)
-    @assert all(row_ranks .≤ A.row_ranks)
-    @assert all(col_ranks .≤ A.col_ranks)
+    @assert axes(rowranks) == axes(row_ranks(A))
+    @assert axes(colranks) == axes(col_ranks(A))
+    @assert all(rowranks .≤ row_ranks(A))
+    @assert all(colranks .≤ col_ranks(A))
   end
   
-  B = SparseCore{T,N,d}(site(A), row_ranks, col_ranks)
+  B = SparseCore{T,N,d}(site(A), rowranks, colranks)
   
-  for n in axes(A.unoccupied,1)
-    copyto!(B.unoccupied[n], view(A.unoccupied[n],1:row_ranks[n],1:col_ranks[n]))
+  for n in axes(unoccupied(A),1)
+    copyto!(unoccupied(B,n), view(unoccupied(A,n),1:rowranks[n],1:colranks[n]))
   end
-  for n in axes(A.occupied,1)
-    copyto!(B.occupied[n], view(A.occupied[n],1:row_ranks[n],1:col_ranks[n+1]))
+  for n in axes(occupied(A),1)
+    copyto!(occupied(B,n), view(occupied(A,n),1:rowranks[n],1:colranks[n+1]))
   end
 
   return B
 end
 
 function Base.Array(A::SparseCore{T,N,d}) where {T<:Number,N,d}
-  array = zeros(T,sum(A.row_ranks),2,sum(A.col_ranks))
-  row_block = [0;cumsum(OffsetArrays.no_offset_view(A.row_ranks))]
-  col_block = [0;cumsum(OffsetArrays.no_offset_view(A.col_ranks))]
+  array = zeros(T,sum(row_ranks(A)),2,sum(col_ranks(A)))
+  row_block = [0;cumsum(OffsetArrays.no_offset_view(row_ranks(A)))]
+  col_block = [0;cumsum(OffsetArrays.no_offset_view(col_ranks(A)))]
 
   for (i,n) in enumerate(axes(A,1))
     if n ∈ axes(A,3)
@@ -1312,11 +1303,11 @@ function Base.Array(A::SparseCore{T,N,d}) where {T<:Number,N,d}
 end
 
 function VectorInterface.zerovector(x::SparseCore{T,N,d}) where {T<:Number,N,d}
-  return SparseCore{T,N,d}(x.k,x.row_ranks,x.col_ranks)
+  return SparseCore{T,N,d}(x.k,row_ranks(x),col_ranks(x))
 end
 
 function VectorInterface.zerovector(x::SparseCore{S,N,d}, T::Type{<:Number}) where {S<:Number,N,d}
-  return SparseCore{T,N,d}(x.k,x.row_ranks,x.col_ranks)
+  return SparseCore{T,N,d}(x.k,row_ranks(x),col_ranks(x))
 end
 
 function VectorInterface.add!!(y::SparseCore{T,N,d}, x::SparseCore{T,N,d}, α::Number, β::Number) where {T<:Number,N,d}

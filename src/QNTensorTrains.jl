@@ -31,13 +31,12 @@ export TTvector, Frame, SparseCore, core, ⊕
 export tt_zeros, tt_ones, tt_state
 export move_core!, round!, round_global!
 export times, power, lognorm, roundSum
+export row_ranks, col_ranks
 include("base/tangent.jl")
 export TTtangent, component, retract, transport
 
-include("base/matrixfree.jl")
+include("base/elementaryops.jl")
 include("base/hamiltonian.jl")
-export Adag_view, A_view, AdagA_view, S_view, Id_view
-export AdagᵢAⱼ_view, AdagᵢAdagⱼAₖAₗ_view
 
 export Adag, A, AdagA, S, Id
 export AdagᵢAⱼ, AdagᵢAdagⱼAₖAₗ

@@ -1,11 +1,15 @@
 module Hamiltonian
-using ..QNTensorTrains: Frame, IdFrame, SparseCore, AdjointSparseCore, UnsafeSparseCore, TTvector
-using ..QNTensorTrains: site, core, cores2tensor, Id_view, S_view, Adag_view, A_view, AdagA_view
+import ..QNTensorTrains
+using ..QNTensorTrains: Frame, IdFrame, SparseCore, AdjointCore, TTvector
+using ..QNTensorTrains: site, core, unoccupied, occupied, row_ranks, col_ranks, row_rank, col_rank
+using ..QNTensorTrains: occupation_qn, shift_qn, cores2tensor
+# using ..QNTensorTrains: Id_view, S_view, Adag_view, A_view, AdagA_view
 using LinearAlgebra, OffsetArrays
 
 export SparseHamiltonian, H_matvec_core, RayleighQuotient, xᵀHy
 
-const Ts = Tuple{NTuple{3,Int64},Union{Int64, NTuple{2,Int64}}}
+const Ts = Tuple{NTuple{3,Int64}, NTuple{2,Int64}}
+const OV{T} = OffsetVector{T,Vector{T}} where T
 
 
 function reduce(v::Array{T,4}; tol=16eps(real(T))) where {T<:Number}
@@ -20,30 +24,42 @@ function reduce(v::Array{T,4}; tol=16eps(real(T))) where {T<:Number}
 
   return v_reduced
 end
- 
-function shift_ranks(ranks::AbstractVector{Int}, 
-                      flux::Int, nl::Int, nr::Int, N::Int)
-  @boundscheck length(ranks) ≥ flux 
-  @boundscheck @assert nl ≥ 0 && nr ≥ 0 && nl + nr ≤ N
-
-  new_ranks = similar(ranks)
-
-  start = min(max(nl,   axes(ranks,1)[begin]+(flux>0 ? flux : 0)), lastindex(ranks )+1)
-  stop  = max(min(N-nr, axes(ranks,1)[end]  +(flux<0 ? flux : 0)), firstindex(ranks)-1)
-  qn = start:stop
-
-  new_ranks[qn] = ranks[qn.-flux]
-  new_ranks[begin:start-1]  .= 0
-  new_ranks[stop+1:end] .= 0
-
-  return new_ranks
-end
 
 using Graphs, MetaGraphsNext
 
 struct SparseHamiltonian{T<:Number,N,d}
-  states::Vector{Vector{Ts}}
-  blocks::Vector{Dict{NTuple{2,Ts},Function}}
+  states::Vector{OV{Vector{Ts}}}
+  state_qns::Vector{OV{Vector{Int}}}
+  coo_blocks::Vector{
+    @NamedTuple{unoccupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{Vector{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{Vector{Int},Vector{Int},Vector{T}}}}
+                              }, 
+                  occupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{Vector{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{Vector{Int},Vector{Int},Vector{T}}}}
+                              } 
+               }}
+  csr_blocks::Vector{
+    @NamedTuple{unoccupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}}}
+                              }, 
+                  occupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}}}
+                              }
+               }}
+  csc_blocks::Vector{
+    @NamedTuple{unoccupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}}}
+                              }, 
+                  occupied::OV{
+             @NamedTuple{unoccupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}},
+                           occupied::OV{Tuple{OV{Int},Vector{Int},Vector{T}}}}
+                              }
+               }}
   graph::MetaGraph
 
   function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ::Val{N}, ::Val{d}; ϵ=eps(), reduced=false) where {T<:Number,N,d}
@@ -102,88 +118,84 @@ struct SparseHamiltonian{T<:Number,N,d}
     #   )
 
 ############################################################
-  function ×(α::Number, op::Function)
-    αop = (A, flux, nl, nr) -> begin
-      B, s... = op(A,flux,nl,nr)
-      return lmul!(α,B), s...
-    end
 
-    return αop
-  end
-
-    # One body states
-    function vertex(n, i,j)
-      if n ≤ min(i,j)
-        state = ( 0,0,1); index =         1
-      elseif i < n ≤ j
-        state = ( 1,1,0); index = (n ≤ hd ? i : j)
-      elseif j < n ≤ i
-        state = (-1,0,1); index = (n ≤ hd ? j : i)
-      else # max(i,j) < n
-        state = ( 0,1,0); index =         1
+    function occupation(l,r)
+      if l==r
+        return :unoccupied
+      elseif l+1==r
+        return :occupied
+      else
+        throw(BoundsError())
       end
-      return (n, state, index)
+    end
+    # One body states
+    function vertex(κ, i,j)
+      if κ ≤ min(i,j)
+        state = ( 0,0,1); index =       (0,0)
+      elseif i < κ ≤ j
+        state = ( 1,1,0); index = (κ ≤ hd ? (i,0) : (j,0))
+      elseif j < κ ≤ i
+        state = (-1,0,1); index = (κ ≤ hd ? (j,0) : (i,0))
+      else # max(i,j) < κ
+        state = ( 0,1,0); index =       (0,0)
+      end
+      return state, index
     end
 
     function weighted_edge(i,j)
       return sort([hd, i,j])[2]
     end
 
-    function set_edge(n, i,j)
-      @assert 1 ≤ n ≤ d
-      v₋ = vertex(n,   i,j)
-      v₊ = vertex(n+1, i,j)
-      stop_path = !add_vertex!(graph, v₋) & !add_vertex!(graph, v₊)
+    function set_edges(κ, i,j, w=T(1))
+      @assert 1 ≤ κ ≤ d
+      s₋,idx₋ = vertex(κ,   i,j)
+      s₊,idx₊ = vertex(κ+1, i,j)
 
-      edge_data = ( n == i == j ? AdagA_view :
-                    n == j      ? A_view     :
-                    n == i      ? Adag_view  :
-                    i < n < j || j < n < i ? 
-                                  S_view : Id_view )
-      add_edge!(graph, v₋, v₊, edge_data)
+      op = ( κ == i == j ? :AdagA :
+             κ == j      ? :A     :
+             κ == i      ? :Adag  :
+             i < κ < j || j < κ < i ? 
+                           :S : :Id )
 
-      return stop_path
-    end
-
-    function set_edge(n, i,j, w)
-      @assert 1 ≤ n ≤ d
-      v₋ = vertex(n,   i,j)
-      v₊ = vertex(n+1, i,j)
-      stop_path = !add_vertex!(graph, v₋) & !add_vertex!(graph, v₊)
-
-      edge_data = ( n == i == j ? AdagA_view :
-                    n == j      ? A_view     :
-                    n == i      ? Adag_view  :
-                    i < n < j || j < n < i ? 
-                                  S_view : Id_view )
-      add_edge!(graph, v₋, v₊, w × edge_data)
-
-      return stop_path
+      qn₋ = shift_qn(occupation_qn(N,d,κ  ), s₋..., N)
+      qn₊ = shift_qn(occupation_qn(N,d,κ+1), s₊..., N)
+      continue_path = false
+      for n₋ in qn₋, n₊ in ( op == :A ? (n₋:n₋) : op ∈ (:Adag, :AdagA) ? (n₋+1:n₋+1) : (n₋:n₋+1) ) ∩ qn₊
+        l  = n₋-s₋[1]
+        r  = n₊-s₊[1]
+        continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋)) | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
+        if op==:S && occupation(n₋,n₊)==:occupied # Jordan-Wigner factor
+          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), (l,occupation(l,r),-w))
+        else
+          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), (l,occupation(l,r),w))
+        end
+      end
+      return continue_path
     end
 
     # Two body states
-    function vertex(n, i,j,k,l)
+    function vertex(κ, i,j,k,l)
       @assert i<j && k<l
-      if n ≤ min(i,k)
-        state = ( 0,0,2);    index =         1
-      elseif i < n ≤ min(j,k)
-        state = ( 1,1,1);    index =         i
-      elseif k < n ≤ min(i,l)
-        state = (-1,0,2);    index =         k
-      elseif max(i,k) < n ≤ min(j,l)
-        state = ( 0,1,1);    index = (n ≤ hd ?  (i,k) : (j,l))
-      elseif j < n ≤ k
-        state = ( 2,2,0);    index = (n ≤ hd ?  (i,j) : (k,l))
-      elseif l < n ≤ i
-        state = (-2,0,2);    index = (n ≤ hd ?  (k,l) : (i,j))
-      elseif max(j,k) < n ≤ l
-        state = ( 1,2,0);    index =         l
-      elseif max(i,l) < n ≤ j
-        state = (-1,1,1);    index =         j
-      else # max(j,l) < n
-        state = ( 0,2,0);    index =         1
+      if κ ≤ min(i,k)
+        state = ( 0,0,2);    index =        (0,0)
+      elseif i < κ ≤ min(j,k)
+        state = ( 1,1,1);    index =        (i,0)
+      elseif k < κ ≤ min(i,l)
+        state = (-1,0,2);    index =        (k,0)
+      elseif max(i,k) < κ ≤ min(j,l)
+        state = ( 0,1,1);    index = (κ ≤ hd ?  (i,k) : (j,l))
+      elseif j < κ ≤ k
+        state = ( 2,2,0);    index = (κ ≤ hd ?  (i,j) : (k,l))
+      elseif l < κ ≤ i
+        state = (-2,0,2);    index = (κ ≤ hd ?  (k,l) : (i,j))
+      elseif max(j,k) < κ ≤ l
+        state = ( 1,2,0);    index =        (l,0)
+      elseif max(i,l) < κ ≤ j
+        state = (-1,1,1);    index =        (j,0)
+      else # max(j,l) < κ
+        state = ( 0,2,0);    index =        (0,0)
       end 
-      return n, state, index
+      return state, index
     end
 
     function weighted_edge(i,j,k,l)
@@ -191,96 +203,185 @@ struct SparseHamiltonian{T<:Number,N,d}
       return sort([hd, i,j,k,l])[3]
     end 
 
-    function set_edge(n, i,j,k,l)
-      @assert i<j && k<l && 1 ≤ n ≤ d
-      v₋ = vertex(n,   i,j,k,l)
-      v₊ = vertex(n+1, i,j,k,l)
-      stop_path = !add_vertex!(graph, v₋) & !add_vertex!(graph, v₊)
+    function set_edges(κ, i,j,k,l,w=T(1))
+      @assert i<j && k<l && 1 ≤ κ ≤ d
 
-      edge_data = ( n ∈ (i,j) && n ∈ (k,l) ? AdagA_view :
-                    n ∈ (k,l)              ? A_view     :
-                    n ∈ (i,j)              ? Adag_view  :
-                    i < n < min(j,k) || k < n < min(i,l) || max(j,k) < n < l || max(i,l) < n < j ?
-                                             S_view : Id_view )
-      add_edge!(graph, v₋, v₊, edge_data)
+      s₋,idx₋ = vertex(κ,   i,j,k,l)
+      s₊,idx₊ = vertex(κ+1, i,j,k,l)
 
-      return stop_path
-    end
+      op = ( κ ∈ (i,j) && κ ∈ (k,l) ? :AdagA :
+             κ ∈ (k,l)              ? :A     :
+             κ ∈ (i,j)              ? :Adag  :
+             i < κ < min(j,k) || k < κ < min(i,l) || max(j,k) < κ < l || max(i,l) < κ < j ?
+                                      :S : :Id )
 
-    function set_edge(n, i,j,k,l, w)
-      @assert i<j && k<l && 1 ≤ n ≤ d
-      v₋ = vertex(n,   i,j,k,l)
-      v₊ = vertex(n+1, i,j,k,l)
-      stop_path = !add_vertex!(graph, v₋) & !add_vertex!(graph, v₊)
+      qn₋ = shift_qn(occupation_qn(N,d,κ  ), s₋..., N)
+      qn₊ = shift_qn(occupation_qn(N,d,κ+1), s₊..., N)
+      continue_path = false
+      for n₋ in qn₋, n₊ in ( op == :A ? (n₋:n₋) : op ∈ (:Adag, :AdagA) ? (n₋+1:n₋+1) : (n₋:n₋+1) ) ∩ qn₊
+        l  = n₋-s₋[1]
+        r  = n₊-s₊[1]
+        continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋)) | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
+        if op==:S && occupation(n₋,n₊)==:occupied # Jordan-Wigner factor
+          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), (l,occupation(l,r),-w))
+        else
+          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), (l,occupation(l,r), w))
+        end
+      end
 
-      edge_data = ( n ∈ (i,j) && n ∈ (k,l) ? AdagA_view :
-                    n ∈ (k,l)              ? A_view     :
-                    n ∈ (i,j)              ? Adag_view  :
-                    i < n < min(j,k) || k < n < min(i,l) || max(j,k) < n < l || max(i,l) < n < j ?
-                                             S_view : Id_view )
-      add_edge!(graph, v₋, v₊, w × edge_data)
-
-      return stop_path
+      return continue_path
     end
 
     graph = MetaGraph(
       DiGraph();                       # Initialize empty graph
-      label_type=Tuple{Int,NTuple{3, Int},Union{Int,NTuple{2,Int}}},          
-                                       # site, state and index
+      label_type=Tuple{Int, Int, NTuple{3, Int}, NTuple{2,Int} },          
+                                       # site, quantum number, state and index
       vertex_data_type=Nothing,        # State details 
-      edge_data_type=Function,         # Coefficient and single-site matrix-free core operation
-      weight_function=ed -> ed[1],
+      edge_data_type=Tuple{Int,Symbol,T}, # relevant block indices, coefficient and single-site operator
+      weight_function=ed -> ed[3],
       default_weight=0.,
       graph_data="Hamiltonian action graph",                  # tag for the whole graph
     )
 
     for i=1:d, j=1:d
       if abs(t[i,j]) > ϵ
-        nₘ = weighted_edge(i,j)
-        set_edge(nₘ, i,j, t[i,j])
-        for n=nₘ+1:d
-          stop_path = set_edge(n, i,j) 
-          stop_path && break
+        κₘ = weighted_edge(i,j)
+        set_edges(κₘ, i,j, t[i,j])
+        for κ=κₘ+1:d
+          continue_path = set_edges(κ, i,j) 
+          continue_path || break
         end
-        for n = nₘ-1:-1:1
-          stop_path = set_edge(n, i,j) 
-          stop_path && break
+        for κ = κₘ-1:-1:1
+          continue_path = set_edges(κ, i,j) 
+          continue_path || break
         end
       end
     end
 
     for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d
       if abs(v[i,j,k,l]) > ϵ
-        nₘ = weighted_edge(i,j,k,l)
-        set_edge(nₘ, i,j,k,l, v[i,j,k,l])
-        for n=nₘ+1:d
-          stop_path = set_edge(n, i,j,k,l) 
-          stop_path && break
+        κₘ = weighted_edge(i,j,k,l)
+        set_edges(κₘ, i,j,k,l, v[i,j,k,l])
+        for κ=κₘ+1:d
+          continue_path = set_edges(κ, i,j,k,l) 
+          continue_path || break
         end
-        for n = nₘ-1:-1:1
-          stop_path = set_edge(n, i,j,k,l) 
-          stop_path && break
+        for κ = κₘ-1:-1:1
+          continue_path = set_edges(κ, i,j,k,l) 
+          continue_path || break
         end
       end
     end
 
-    nstates = [0 for n=1:d+1]
-    for (n,s,idx) in labels(graph)
-      nstates[n] += 1
+    nstates = [ [ 0 for n in occupation_qn(N,d,k)]                               for k=1:d+1]
+    for (k,n,s,idx) in labels(graph)
+      nstates[k][n] += 1
     end
 
-    states = [ Vector{Ts}(undef, nstates[n]) for n=1:d+1]
-    i = [0 for n=1:d+1]
-    for (n, s, idx) in labels(graph)
-      i[n]+=1
-      states[n][i[n]] = (s, idx)
-    end
-    blocks = [ Dict{Tuple{Ts, Ts}, Function}()     for n=1:d]
-    for ((n₁,s₁,idx₁), (n₂,s₂,idx₂)) in edge_labels(graph)
-      blocks[n₁][((s₁,idx₁),(s₂,idx₂))] = graph[(n₁,s₁,idx₁), (n₂,s₂,idx₂)]
+    states = [ [ Vector{Ts}(undef, nstates[k][n]) for n in occupation_qn(N,d,k)] for k=1:d+1]
+    i      = [ [ 0 for n in occupation_qn(N,d,k)                               ] for k=1:d+1]
+    for (k,n,s,idx) in labels(graph)
+      states[k][n][
+        i[k][n] += 1
+                  ] = (s, idx)
     end
 
-    return new{T,N,d}(states, blocks, graph)
+    for k=1:d+1, n in occupation_qn(N,d,k)
+      sort!(states[k][n]) # Let's try mostly the default lexicographic order.
+    end
+    state_to_index = [ [ Dict(s=>i for (i,s) in enumerate(states[k][n])) 
+                         for n in occupation_qn(N,d,k) ] for k=1:d+1 ]
+    state_qns = [ [ [n-flux for ((flux,),) in states[k][n]] 
+                         for n in occupation_qn(N,d,k) ] for k=1:d+1 ]
+
+    qn = [ (
+      unoccupied = occupation_qn(N,d,k)∩ occupation_qn(N,d,k+1),
+      occupied   = occupation_qn(N,d,k)∩(occupation_qn(N,d,k+1).-1)
+           ) for k=1:d ]
+
+    wrap(f) = [(
+      unoccupied = OffsetVector( 
+        [( unoccupied = OffsetVector([f(k,n,:unoccupied,m,:unoccupied) for m in qn[k].unoccupied∩(n-2:n+2)], qn[k].unoccupied∩(n-2:n+2)),
+             occupied = OffsetVector([f(k,n,:unoccupied,m,:occupied)   for m in qn[k].occupied  ∩(n-2:n+2)], qn[k].occupied  ∩(n-2:n+2))
+         ) for n in qn[k].unoccupied ], qn[k].unoccupied ),
+      occupied   = OffsetVector( 
+        [( unoccupied = OffsetVector([f(k,n,:occupied,  m,:unoccupied) for m in qn[k].unoccupied∩(n-2:n+2)], qn[k].unoccupied∩(n-2:n+2)),
+             occupied = OffsetVector([f(k,n,:occupied,  m,:occupied)   for m in qn[k].occupied  ∩(n-2:n+2)], qn[k].occupied  ∩(n-2:n+2))
+         ) for n in qn[k].occupied ],   qn[k].occupied   )
+                         ) for k=1:d ]
+
+    nblocks = wrap( (idx...) -> 0)
+    for ( (k₁,n₁,s₁,idx₁), (k₂,n₂,s₂,idx₂) ) in edge_labels(graph)
+      m,occ_m,α = graph[(k₁,n₁,s₁,idx₁), (k₂,n₂,s₂,idx₂)]
+      nblocks[k₁][occupation(n₁,n₂)][n₁][occ_m][m] += 1
+    end
+
+    # Here we obtain the blocks of the TT-cores indexed by n and occupation, 
+    # for any given block indexed by l and occupation from the original TT-core,
+    # stored in sparse COO format: row/column state indices and corresponding multiplier
+    coo_blocks = wrap( (k,n,occ_n,m,occ_m) -> (Vector{Int}(undef, nblocks[k][occ_n][n][occ_m][m]), 
+                                               Vector{Int}(undef, nblocks[k][occ_n][n][occ_m][m]), 
+                                               Vector{T}(  undef, nblocks[k][occ_n][n][occ_m][m])) )
+    j = wrap( (idx...) -> 0)
+    for ((k₁,n₁,s₁,idx₁), (k₂,n₂,s₂,idx₂)) in edge_labels(graph)
+      i₁ = state_to_index[k₁][n₁][(s₁,idx₁)]
+      i₂ = state_to_index[k₂][n₂][(s₂,idx₂)]
+      m,occ_m,α = graph[(k₁,n₁,s₁,idx₁), (k₂,n₂,s₂,idx₂)]
+
+      j[k₁][occupation(n₁,n₂)][n₁][occ_m][m] += 1
+      J = j[k₁][occupation(n₁,n₂)][n₁][occ_m][m]
+      block = coo_blocks[k₁][occupation(n₁,n₂)][n₁][occ_m][m]
+
+      block[1][J], block[2][J], block[3][J] = i₁, i₂, α
+    end
+
+    # Post-processing to compute alternative CSR and CSC formats of the same sparse objects
+    csc_blocks = wrap( (idx...) -> (OffsetVector(Int[], 1:0),Int[],T[]) )
+    csr_blocks = wrap( (idx...) -> (OffsetVector(Int[], 1:0),Int[],T[]) )
+
+    for k=1:d, occ_n in (:unoccupied, :occupied), n in axes(coo_blocks[k][occ_n],1), occ_m in (:unoccupied, :occupied), m in axes(coo_blocks[k][occ_n][n][occ_m],1)
+      nnz   = nblocks[k][occ_n][n][occ_m][m]
+      if nnz>0
+        block = coo_blocks[k][occ_n][n][occ_m][m]
+        p_row = sortperm(1:nnz, lt= (i,j)->( (block[1][i],block[2][i]) < (block[1][j],block[2][j]) ) )
+
+        permute!(block[1], p_row)
+        permute!(block[2], p_row)
+        permute!(block[3], p_row)
+        row_range = block[1][1]:block[1][end]+1
+
+        row_starts = OffsetVector(zeros(Int,length(row_range)), row_range)
+        row = block[1][1]
+        row_starts[row] = 1
+        for i=1:nnz
+          if block[1][i] > row
+            row_starts[row+1:block[1][i]] .= i
+            row = block[1][i]
+          end
+        end
+        row_starts[end] = nnz+1
+
+        csr_blocks[k][occ_n][n][occ_m][m] = (row_starts, block[2], block[3])
+
+        p_col = sortperm(1:nnz, lt= (i,j)->( (block[2][i],block[1][i]) < (block[2][j],block[1][j]) ) )
+        col_range = block[2][p_col[1]]:block[2][p_col[end]]+1
+
+        col_starts = OffsetVector(zeros(Int,length(col_range)), col_range)
+        col = block[2][p_col[1]]
+        col_starts[col] = 1
+        for i=1:nnz
+          if block[2][p_col[i]] > col
+            col_starts[col+1:block[2][p_col[i]]] .= i
+            col = block[2][p_col[i]]
+          end
+        end
+        col_starts[end] = nnz+1
+
+        csc_blocks[k][occ_n][n][occ_m][m] = ( col_starts, block[2][p_col], block[3][p_col] )
+      end
+    end
+
+    return new{T,N,d}(states, state_qns, coo_blocks, csr_blocks, csc_blocks, graph)
   end
 end
 
@@ -288,171 +389,286 @@ function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ψ::TTvector{T,N,d}; ϵ=
   return SparseHamiltonian(t,v,Val(N),Val(d); ϵ=ϵ, reduced=reduced)
 end
 
-"""
-  `H_matvec_core(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d})`
-
-Core function for the matrix-free application of two-body Hamiltonian operators,
-implementing the action on a given TT `x`.
-The Hamiltonian is given in terms of one-electron integrals `t_{ij}` and two-electron integrals `v_{ijkl}`.
-
-In particular, the two-electron integrals are assumed to be given in physicists' notation and *reduced format* that is,
-`v_{ijkl} = 1/2 ( <ij|kl>  + <ji|kl> - <ij|lk> - <ji|kl> )` for `i < j` and `k < l`,
-where `<ij|kl> = ∫∫ ψ†_i(x₁) ψ†_j(x₂) 1/|x₁-x₂| ψ_k(x₁) ψ_l(x₂) dx₁dx₂`.
-
-Returns a tuple containing a sparse representation of the resulting core:
-block ranks, block row and column index ranges and views into block data.
-"""
-function H_matvec_core(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
-  n = x.k
-  row_states = H.states[n]
-  col_states = H.states[n+1]
-  blocks     = H.blocks[n]
-
-  ##################################################################################################
-  ###                       Precompute ranks and block structure ranges                          ###
-  ##################################################################################################
-
-  HC = ( similar(x.row_ranks), 
-         similar(x.col_ranks), 
-         Vector{OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}}(undef, length(blocks)), 
-         Vector{OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}}(undef, length(blocks)), 
-         Vector{UnsafeSparseCore{T,N,d}}(undef, length(blocks))
-        )
-
-  rowsize = length(row_states)
-  colsize = length(col_states)
-  blockrow_starts = [1 for i=1:rowsize, ql in axes(x, 1)]
-  blockrow_ends   = [0 for i=1:rowsize, ql in axes(x, 1)]
-  blockcol_starts = [1 for i=1:colsize, ql in axes(x, 3)]
-  blockcol_ends   = [0 for i=1:colsize, ql in axes(x, 3)]
-
-  row_ranks = HC[1]
-  col_ranks = HC[2]
-
-  if n == 1 # First core is special; stacking horizontally (row rank should be same as `x`)
-    for (i, state) in enumerate(row_states)
-      blockrow_ends[i,:] = shift_ranks(x.row_ranks, first(state)..., N) 
-        # should be filled with zeros and x.row_ranks[0] (usually 1)'s
+function QNTensorTrains.row_ranks(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  k = x.k
+  if k==1
+    return row_ranks(x)
+  else
+    state_qns = H.state_qns[k]
+    ranks = similar(row_ranks(x))
+    for n in axes(ranks,1)
+      ranks[n] = isempty(state_qns[n]) ? 0 : sum(row_rank(x,l) for l in state_qns[n])
     end
-    row_ranks .= x.row_ranks
-  else # n > 1
-    starts = [1 for ql in axes(x, 1)]
-    for (i, (s,idx)) in enumerate(row_states)
-      R = shift_ranks(x.row_ranks, s..., N)
-      blockrow_starts[i,:] = starts
-      blockrow_ends[  i,:] = starts .+ R .- 1
-      starts .+= R
-    end
-    row_ranks .= blockrow_ends[end,:]
+    return ranks
   end
-
-  if n<d
-    starts = [1 for ql in axes(x, 3)]
-    for (i, (s,idx)) in enumerate(col_states)
-      R = shift_ranks(x.col_ranks, s..., N)
-      blockcol_starts[i,:] .= starts
-      blockcol_ends[  i,:] .= starts .+ R .- 1
-      starts .+= R
-    end
-    col_ranks .= blockcol_ends[end,:]
-  else # n == d # Last core: stacking vertically (column rank should be same as `x`)
-    for  (i,(s,idx)) in enumerate(col_states)
-      blockcol_ends[i,:] .= shift_ranks(x.col_ranks, s..., N)
-        # should be filled with zeros and x.col_ranks[N] (usually 1)'s
-    end
-    col_ranks .= x.col_ranks
-  end
-
-  blockrow_ranges = Dict{ Ts, 
-                          OffsetArrays.OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}
-                        }(
-    v => [ blockrow_starts[i,l]:blockrow_ends[i,l] for l in axes(x,1)] 
-    for (i, v) in enumerate(row_states)
-                        )
-  blockcol_ranges = Dict{ Ts, 
-                          OffsetArrays.OffsetVector{UnitRange{Int}, Vector{UnitRange{Int}}}
-                        }(
-    v => [ blockcol_starts[i,l]:blockcol_ends[i,l] for l in axes(x,3)] 
-    for (i, v) in enumerate(col_states) 
-                        )
-
-  ##########################################################################################################################################
-
-  for (j, ( ((s₁,idx₁),(s₂,idx₂)), op ) ) in enumerate(blocks)
-    OpC, colstate... = op(x, s₁...)
-    @boundscheck @assert colstate == s₂
-    HC[3][j] = blockrow_ranges[(s₁,idx₁)]
-    HC[4][j] = blockcol_ranges[(s₂,idx₂)]
-    HC[5][j] = OpC
-  end
-
-  return HC
 end
 
-function Base.:*(Fᴸ::Frame{T,N,d,M}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  Hx = H_matvec_core(H, x)
+function row_ranges(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  k = x.k
+  state_qns = H.state_qns[k]
+  row_ranges = similar(row_ranks(x),Vector{UnitRange{Int}})
+
+  if k==1
+    row_ranges[0] = [(1:row_ranks(x)[0]) for i=1:length(state_qns[0])]
+  else
+    for n in axes(row_ranges,1)
+      ends = cumsum(row_ranks(x)[l] for l in state_qns[n])
+      row_ranges[n] = [(i==1 ? 1 : ends[i-1]+1):ends[i] for i=1:length(state_qns[n])]
+    end
+  end
+  return row_ranges
+end
+
+function QNTensorTrains.col_ranks(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
+  k = x.k
+  if k==d
+    return col_ranks(x)
+  else
+    state_qns = H.state_qns[k+1]
+    ranks = similar(col_ranks(x))
+    for n in axes(ranks,1)
+      ranks[n] = isempty(state_qns[n]) ? 0 : sum(col_rank(x,r) for r in state_qns[n])
+    end
+    return ranks
+  end
+end
+
+function col_ranges(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
+  k = x.k
+  state_qns = H.state_qns[k+1]
+  col_ranges = similar(col_ranks(x),Vector{UnitRange{Int}})
+
+  if k==d
+    col_ranges[N] = [(1:col_ranks(x)[N]) for j=1:length(state_qns[N])]
+  else
+    for n in axes(col_ranges,1)
+      ends = cumsum(col_ranks(x)[r] for r in state_qns[n])
+      col_ranges[n] = [(i==1 ? 1 : ends[i-1]+1):ends[i] for i=1:length(state_qns[n])]
+    end
+  end
+  return col_ranges
+end
+
+function Base.:*(Fᴸ::Frame{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
     @assert site(Fᴸ) == site(x)
-    @assert Fᴸ.col_ranks == Hx[1]
+    @assert Fᴸ.col_ranks == row_ranks(H,x)
   end
-  y = SparseCore{T,N,d}(x.k, Fᴸ.row_ranks, Hx[2])
-  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
-    mul!(y[:,J], Fᴸ[:,I], v, 1, 1)
+  I,J = row_ranges(H,x), col_ranges(H,x)
+
+  y = SparseCore{T,N,d}(x.k, Fᴸ.row_ranks, col_ranks(H,x))
+  COO = H.coo_blocks[x.k]
+  @sync begin
+    for n in axes(unoccupied(y),1)
+      @Threads.spawn let Y = unoccupied(y,n), F = Fᴸ[n]
+        for m in axes(unoccupied(x),1)∩(n-2:n+2)
+          X = unoccupied(x,m)
+          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+            mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+          end
+        end
+        for m in axes(occupied(x),1)∩(n-2:n+2)
+          X = occupied(x,m)
+          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+            mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
+          end
+        end
+      end
+    end
+    for n in axes(occupied(y),1)
+      @Threads.spawn let Y = occupied(y,n), F = Fᴸ[n]
+        for m in axes(unoccupied(x),1)∩(n-2:n+2)
+          X = unoccupied(x,m)
+          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+            mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+          end
+        end
+        for m in axes(occupied(x),1)∩(n-2:n+2)
+          X = occupied(x,m)
+          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+            mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
+          end
+        end
+      end
+    end
   end
+
   return y
 end
 
-function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, Fᴿ::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  Hx = H_matvec_core(H, x)
+function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, Fᴿ::Frame{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
     @assert site(Fᴿ) == site(x)+1
-    @assert Fᴿ.row_ranks == Hx[2]
+    @assert Fᴿ.row_ranks == col_ranks(H,x)
   end
-  y = SparseCore{T,N,d}(x.k, Hx[1], Fᴿ.col_ranks)
-  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
-    mul!(y[I,:], v, Fᴿ[J,:], 1, 1)
+  I,J = row_ranges(H,x), col_ranges(H,x)
+
+  y = SparseCore{T,N,d}(x.k, row_ranks(H,x), Fᴿ.col_ranks)
+  COO = H.coo_blocks[x.k]
+  @sync begin
+    for n in axes(unoccupied(y),1)
+      @Threads.spawn let Y = unoccupied(y,n), F = Fᴿ[n]
+        for m in axes(unoccupied(x),1)∩(n-2:n+2)
+          X = unoccupied(x,m)
+          for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+          end
+        end
+        for m in axes(occupied(x),1)∩(n-2:n+2)
+          X = occupied(x,m)
+          for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(F,J[n][j],:), α, 1)
+          end
+        end
+      end
+    end
+    for n in axes(occupied(y),1)
+      @Threads.spawn let Y = occupied(y,n), F = Fᴿ[n+1]
+        for m in axes(unoccupied(x),1)∩(n-2:n+2)
+          X = unoccupied(x,m)
+          for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+          end
+        end
+        for m in axes(occupied(x),1)∩(n-2:n+2)
+          X = occupied(x,m)
+          for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+            mul!(view(Y,I[n][i],:), X, view(F,J[n+1][j],:), α, 1)
+          end
+        end
+      end
+    end
   end
   return y
 end
 
-
-function Base.:*(l::AdjointSparseCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
-  Hx = H_matvec_core(H, x)
+function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
     @assert site(l) == site(x)
-    @assert parent(l).row_ranks == Hx[1]
+    @assert col_ranks(l) == row_ranks(H,x)
   end
-  y = Frame{T,N,d}(x.k+1, parent(l).col_ranks, Hx[2])
-  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
-    mul!(y[:,J], l[:,I], v, 1, 1)
+  I,J = row_ranges(H,x), col_ranges(H,x)
+
+  y = Frame{T,N,d}(x.k+1, row_ranks(l), col_ranks(H,x))
+  COO = H.coo_blocks[x.k]
+  @sync for n in axes(unoccupied(parent(l)),1)
+    @Threads.spawn let Y = y[n], L = unoccupied(l,n)
+      for m in axes(unoccupied(x),1)∩(n-2:n+2)
+        X = unoccupied(x,m)
+        for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+          mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+        end
+      end
+      for m in axes(occupied(x),1)∩(n-2:n+2)
+        X = occupied(x,m)
+        for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+          mul!(view(Y,:,J[n][j]), view(L,:,I[n][i]), X, α, 1)
+        end
+      end
+    end
+  end
+  @sync for n in axes(occupied(parent(l)),1)
+    @Threads.spawn let Y = y[n+1], L = occupied(l,n+1)
+      for m in axes(unoccupied(x),1)∩(n-2:n+2)
+        X = unoccupied(x,m)
+        for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+          mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+        end
+      end
+      for m in axes(occupied(x),1)∩(n-2:n+2)
+        X = occupied(x,m)
+        for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+          mul!(view(Y,:,J[n+1][j]), view(L,:,I[n][i]), X, α, 1)
+        end
+      end
+    end
   end
   return y
 end
 
-function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointSparseCore{T,N,d}) where {T<:Number,N,d}
-  Hx = H_matvec_core(H, x)
+function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCore{T,N,d}) where {T<:Number,N,d}
   @boundscheck begin
     @assert site(r) == site(x)
-    @assert parent(r).col_ranks == Hx[2]
+    @assert row_ranks(r) == col_ranks(H,x)
   end
-  y = Frame{T,N,d}(x.k, Hx[1], parent(r).row_ranks)
-  for (I,J,v) in zip(Hx[3],Hx[4],Hx[5])
-    mul!(y[I,:], v, r[J,:], 1, 1)
+  I,J = row_ranges(H,x), col_ranges(H,x)
+
+  y = Frame{T,N,d}(x.k, row_ranks(H,x), col_ranks(r))
+  COO = H.coo_blocks[x.k]
+  @sync for n in axes(unoccupied(parent(r)),1)
+    @Threads.spawn let Y = y[n], R = unoccupied(r,n)
+      for m in axes(unoccupied(x),1)∩(n-2:n+2)
+        X = unoccupied(x,m)
+        for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+          mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+        end
+      end
+      for m in axes(occupied(x),1)∩(n-2:n+2)
+        X = occupied(x,m)
+        for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+          mul!(view(Y,I[n][i],:), X, view(R,J[n][j],:), α, 1)
+        end
+      end
+    end
+  end
+  @sync for n in axes(occupied(parent(r)),1)
+    @Threads.spawn let Y = y[n], R = occupied(r,n+1)
+      for m in axes(unoccupied(x),1)∩(n-2:n+2)
+        X = unoccupied(x,m)
+        for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+          mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+        end
+      end
+      for m in axes(occupied(x),1)∩(n-2:n+2)
+        X = occupied(x,m)
+        for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+          mul!(view(Y,I[n][i],:), X, view(R,J[n+1][j],:), α, 1)
+        end
+      end
+    end
   end
   return y
 end
 
 function Base.:*(H::SparseHamiltonian{T,N,d}, X::TTvector{T,N,d}) where {T<:Number,N,d}
   cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
-
   for k=1:d
-    Hxₖ = H_matvec_core(H, core(X,k))
-    cores[k] = SparseCore{T,N,d}(k, Hxₖ[1], Hxₖ[2])
-    for (I,J,v) in zip(Hxₖ[3],Hxₖ[4],Hxₖ[5])
-      copyto!(cores[k][I,J], v)
+    x = core(X,k)
+    cores[k] = SparseCore{T,N,d}(k, row_ranks(H,x), col_ranks(H,x))
+    I,J = row_ranges(H,x), col_ranges(H,x)
+
+    COO = H.coo_blocks[k]
+    @sync begin
+      for n in axes(unoccupied(cores[k]),1)
+        @Threads.spawn let Y = unoccupied(cores[k],n)
+          for m in axes(unoccupied(x),1)∩(n-2:n+2)
+            for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
+              axpy!(α, unoccupied(x,m), view(Y, I[n][i], J[n][j]))
+            end
+          end
+          for m in axes(occupied(x),1)∩(n-2:n+2)
+            for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
+              axpy!(α, occupied(x,m), view(Y, I[n][i], J[n][j]))
+            end
+          end
+        end
+      end
+      for n in axes(occupied(cores[k]),1)
+        @Threads.spawn let Y = occupied(cores[k],n)
+          for m in axes(unoccupied(x),1)∩(n-2:n+2)
+            for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
+              axpy!(α, unoccupied(x,m), view(Y, I[n][i], J[n+1][j]))
+            end
+          end
+          for m in axes(occupied(x),1)∩(n-2:n+2)
+            for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
+              axpy!(α, occupied(x,m), view(Y, I[n][i], J[n+1][j]))
+            end
+          end
+        end
+      end
     end
   end
-
   return cores2tensor(cores)
 end
 

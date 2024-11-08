@@ -168,7 +168,7 @@ function randRound_H_MatVec2(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, rm
   return round_global!(randRound_H_MatVec2(H, x,rmax+over), rmax=rmax)
 end
 
-
+using TimerOutputs
 """
   randRound_H_MatVecAdd2(α::Vector{T}, H::SparseHamiltonian{T,N,d}, x::Vector{TTvector{T,N,d}}, m::Int)
 
@@ -177,7 +177,7 @@ end
   using randomized sketches onto `m` rank-one vectors.
 """
 function randRound_H_MatVecAdd2( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summands::Vector{TTvector{T,N,d,S}},
-                               m::Int) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+                               m::Int, to::TimerOutput) where {T<:Number,N,d,S<:AbstractMatrix{T}}
   target_r = [[min(m, binomial(k-1,n), binomial(d+1-k,N-n)) for n in occupation_qn(N,d,k)] for k=1:d+1]
 
   @assert all(target_r[  1][0] == rank(x,  1,0) == 1 for x in summands)
@@ -188,38 +188,56 @@ function randRound_H_MatVecAdd2( α::Vector{T}, H::SparseHamiltonian{T,N,d}, sum
   # Initialize tensor cores array for the result
   cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef,d)
 
+@timeit to "Framing" begin
   # Precompute partial projections W
   Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
 
   Ω = [ randd(N,d,k,m) for k=1:d-1]
   Fᴸ[1,1] = IdFrame(Val(N), Val(d), 1)
+@timeit to "Randomized matvec" begin
   for k=1:d-1
     Fᴸ[1,k+1] = (adjoint(Ω[k]) * Fᴸ[1,k]) * H * core(summands[1], k)
   end
+end
   for s=2:length(summands)
     Fᴸ[s,1] = IdFrame(Val(N), Val(d), 1)
     for k=1:d-1
       Fᴸ[s,k+1] = (adjoint(Ω[k]) * Fᴸ[s,k]) * core(summands[s],k)
     end
   end
-
+end
+@timeit to "Core assembly" begin
+@timeit to "Form Fᴿ" begin
   Fᴿ = [ lmul!(α[s], IdFrame(Val(N), Val(d), d+1)) for s in axes(summands,1)]
+end
   for k=d:-1:2
-    SₖFᴿ = [ s == 1 ? H * core(summands[1],k) * Fᴿ[1] : core(summands[s],k) * Fᴿ[s] for s in axes(summands,1)]
+    SₖFᴿ = [ s == 1 ? 
+(@timeit to "Randomized matvec" begin
+   H * core(summands[1],k) * Fᴿ[1] end) : 
+(@timeit to "SₖFᴿ" begin 
+   core(summands[s],k) * Fᴿ[s] end) 
+      for s in axes(summands,1)]
+@timeit to "Frame FᴸSₖFᴿ" begin
     FᴸSₖFᴿ = SparseCore{T,N,d}(k, Fᴸ[1,k].row_ranks, Fᴿ[1].col_ranks)
     for s in axes(summands,1)
       mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
+end
+@timeit to "CQ factorization" begin
     Q, = cq!(FᴸSₖFᴿ)
+end
+@timeit to "Form Fᴿ" begin
     Fᴿ = [SₖFᴿ[s] * adjoint(Q) for s in axes(summands,1)]
+end
     cores[k] = Q
   end
-
+@timeit to "Frame SₖFᴿ" begin
   cores[1] = H * core(summands[1],1) * Fᴿ[1]
   for s = 2:length(summands)
     mul!(cores[1], core(summands[s],1), Fᴿ[s], 1, 1)
   end
-
+end
+end
   tt = cores2tensor(cores)
 
   tt.orthogonal = true
