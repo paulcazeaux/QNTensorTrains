@@ -17,27 +17,29 @@ function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, targe
   # Precompute partial projections W
   Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
   for s=1:length(summands)
-    Fᴸ[s,1] = IdFrame(Val(N), Val(d), 1)
+    Fᴸ[s,1] = IdFrame(Val(d), Val(N), 1)
     for k=1:d-1
       Fᴸ[s,k+1] = (adjoint(core(Ω,k)) * Fᴸ[s,k]) * core(summands[s],k)
     end
   end
 
-  Fᴿ = [ lmul!(α[s], IdFrame(Val(N), Val(d), d+1)) for s in axes(summands,1)]
+  SₖFᴿ = [ core(summands[s],d) * lmul!(α[s], IdFrame(Val(d), Val(N), d+1)) for s in axes(summands,1)]
   for k=d:-1:2
-    SₖFᴿ = [ core(summands[s],k) * Fᴿ[s] for s in axes(summands,1)]
     FᴸSₖFᴿ = Fᴸ[1,k] * SₖFᴿ[1]
     for s = 2:length(summands)
       mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
     Q, = cq!(FᴸSₖFᴿ)
-    Fᴿ = [SₖFᴿ[s] * adjoint(Q) for s in axes(summands,1)]
     cores[k] = Q
-  end
 
-  cores[1] = core(summands[1],1) * Fᴿ[1]
-  for s = 2:length(summands)
-    mul!(cores[1], core(summands[s],1), Fᴿ[s], 1, 1)
+    if k>2
+      SₖFᴿ = [ core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) for s in axes(summands,1) ]
+    else
+      cores[1] = core(summands[1],1) * (SₖFᴿ[1] * adjoint(Q))
+      for s = 2:length(summands)
+        mul!(cores[1], core(summands[s],1), (SₖFᴿ[s] * adjoint(Q)), 1, 1)
+      end
+    end
   end
 
   tt = cores2tensor(cores)
@@ -77,30 +79,35 @@ function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,N,d,M}}, m::I
 
   # Precompute partial projections W
   Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
-  for k=1:d-1
-    Ωₖ = randd(N,d,k,m)
+
+  Ω₁ = randh(Val(d),Val(N),m)
+  for s=1:length(summands)
+    Fᴸ[s,2] = adjoint(Ω₁) * core(summands[s],1)
+  end
+  for k=2:d-1
+    Ωₖ = randd(Val(d),Val(N),k,m)
     for s=1:length(summands)
-      k == 1 && ( Fᴸ[s,1] = IdFrame(Val(N), Val(d), 1) )
-      # Use randomized diagonal cores (i.e. block-TT representation of m rank-one vectors) for projection
-      Fᴸ[s,k+1] = (adjoint(Ωₖ) * Fᴸ[s,k]) * core(summands[s],k)
+      Fᴸ[s,k+1] = adjoint(Ωₖ) * (Fᴸ[s,k] * core(summands[s],k))
     end
   end
 
-  Fᴿ = [ lmul!(α[s], IdFrame(Val(N), Val(d), d+1)) for s in axes(summands,1)]
+  SₖFᴿ = [ core(summands[s],d) * lmul!(α[s], IdFrame(Val(d), Val(N), d+1)) for s in axes(summands,1)]
   for k=d:-1:2
-    SₖFᴿ = [ core(summands[s],k) * Fᴿ[s] for s in axes(summands,1)]
     FᴸSₖFᴿ = Fᴸ[1,k] * SₖFᴿ[1]
     for s = 2:length(summands)
       mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
     Q, = cq!(FᴸSₖFᴿ)
-    Fᴿ = [SₖFᴿ[s] * adjoint(Q) for s in axes(summands,1)]
     cores[k] = Q
-  end
 
-  cores[1] = core(summands[1],1) * Fᴿ[1]
-  for s = 2:length(summands)
-    mul!(cores[1], core(summands[s],1), Fᴿ[s], 1, 1)
+    if k>2
+      SₖFᴿ = [ core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) for s in axes(summands,1)]
+    else
+      cores[1] = core(summands[1],1) * (SₖFᴿ[1] * adjoint(Q))
+      for s = 2:length(summands)
+        mul!(cores[1], core(summands[s],1), SₖFᴿ[s] * adjoint(Q), 1, 1)
+      end
+    end
   end
 
   tt = cores2tensor(cores)

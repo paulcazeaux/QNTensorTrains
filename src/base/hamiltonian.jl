@@ -3,7 +3,6 @@ import ..QNTensorTrains
 using ..QNTensorTrains: Frame, IdFrame, SparseCore, AdjointCore, TTvector
 using ..QNTensorTrains: site, core, unoccupied, occupied, row_ranks, col_ranks, row_rank, col_rank
 using ..QNTensorTrains: occupation_qn, shift_qn, cores2tensor
-# using ..QNTensorTrains: Id_view, S_view, Adag_view, A_view, AdagA_view
 using LinearAlgebra, OffsetArrays
 
 export SparseHamiltonian, H_matvec_core, RayleighQuotient, xᵀHy
@@ -463,11 +462,23 @@ function Base.:*(Fᴸ::Frame{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{
       @Threads.spawn let Y = unoccupied(y,n), F = Fᴸ[n]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
+          # if !isempty(COO.unoccupied[n].unoccupied[m][1])
+          #   nnz = length(COO.unoccupied[n].unoccupied[m][1])
+          #   row_ratio = -nnz/-(extrema(COO.unoccupied[n].unoccupied[m][1])...)
+          #   col_ratio = -nnz/-(extrema(COO.unoccupied[n].unoccupied[m][2])...)
+          #   @show site(x),n,m,nnz,row_ratio,col_ratio
+          # end
           for (i,j,α) in zip(COO.unoccupied[n].unoccupied[m]...)
             mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
+          # if !isempty(COO.unoccupied[n].occupied[m][1])
+          #   nnz = length(COO.unoccupied[n].occupied[m][1])
+          #   row_ratio = -nnz/-(extrema(COO.unoccupied[n].occupied[m][1])...)
+          #   col_ratio = -nnz/-(extrema(COO.unoccupied[n].occupied[m][2])...)
+          #   @show site(x),n,m,nnz,row_ratio,col_ratio
+          # end
           X = occupied(x,m)
           for (i,j,α) in zip(COO.unoccupied[n].occupied[m]...)
             mul!(view(Y,:,J[n][j]), view(F,:,I[n][i]), X, α, 1)
@@ -479,12 +490,24 @@ function Base.:*(Fᴸ::Frame{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCore{
       @Threads.spawn let Y = occupied(y,n), F = Fᴸ[n]
         for m in axes(unoccupied(x),1)∩(n-2:n+2)
           X = unoccupied(x,m)
+          # if !isempty(COO.occupied[n].unoccupied[m][1])
+          #   nnz = length(COO.occupied[n].unoccupied[m][1])
+          #   row_ratio = -nnz/-(extrema(COO.occupied[n].unoccupied[m][1])...)
+          #   col_ratio = -nnz/-(extrema(COO.occupied[n].unoccupied[m][2])...)
+          #   @show site(x),n,m,nnz,row_ratio,col_ratio
+          # end
           for (i,j,α) in zip(COO.occupied[n].unoccupied[m]...)
             mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
           end
         end
         for m in axes(occupied(x),1)∩(n-2:n+2)
           X = occupied(x,m)
+          # if !isempty(COO.occupied[n].occupied[m][1])
+          #   nnz = length(COO.occupied[n].occupied[m][1])
+          #   row_ratio = -nnz/-(extrema(COO.occupied[n].occupied[m][1])...)
+          #   col_ratio = -nnz/-(extrema(COO.occupied[n].occupied[m][2])...)
+          #   @show site(x),n,m,nnz,row_ratio,col_ratio
+          # end
           for (i,j,α) in zip(COO.occupied[n].occupied[m]...)
             mul!(view(Y,:,J[n+1][j]), view(F,:,I[n][i]), X, α, 1)
           end
@@ -682,7 +705,7 @@ function RayleighQuotient(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}; ortho
 # end
 
 # @timeit to "Frame 1" begin
-  p = IdFrame(Val(N), Val(d), 1)
+  p = IdFrame(Val(d), Val(N), 1)
 # end
 # @timeit to "Contractions" begin
   for k=1:d
@@ -706,7 +729,7 @@ function xᵀHy(x::TTvector{T,N,d}, H::SparseHamiltonian{T,N,d}, y::TTvector{T,N
 # end
 
 # @timeit to "Frame 1" begin
-  p = IdFrame(Val(N), Val(d), 1)
+  p = IdFrame(Val(d), Val(N), 1)
 # end
 # @timeit to "Contractions" begin
   for k=1:d

@@ -413,7 +413,7 @@ function IdFrame(k::Int, tt::TTvector{T,N,d}) where {T<:Number,N,d}
   return Frame{T,N,d}(k, [T(1)*I(rank(tt,k)) for k in occupation_qn(N,d,k)])
 end
 
-function IdFrame(::Val{N}, ::Val{d}, k::Int, r::Int=1, ::Type{T}=Float64) where {T<:Number,N,d}
+function IdFrame(::Val{d}, ::Val{N}, k::Int, r::Int=1, ::Type{T}=Float64) where {T<:Number,N,d}
   return Frame{T,N,d}(k, [T(1)*I(r) for n in occupation_qn(N,d,k)])
 end
 

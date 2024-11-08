@@ -25,7 +25,8 @@ function Base.randn(N::Int, d::Int, k::Int,
     else
       σ = 1
     end
-    copyto!(A[n,1,n],  σ*randn(T,row_ranks[n],col_ranks[n]))
+    randn!(A[n,1,n])
+    A[n,1,n] .*= σ
     # @show norm(A[n,1,n])
   end
   for n in axes(A.occupied, 1)
@@ -34,7 +35,8 @@ function Base.randn(N::Int, d::Int, k::Int,
     else
       σ = 1
     end
-    copyto!(A[n,2,n+1], σ*randn(T,row_ranks[n],col_ranks[n+1]))
+    randn!(A[n,2,n+1])
+    A[n,2,n+1] .*= σ
     # @show norm(A[n,2,n+1])
   end
 
@@ -125,35 +127,53 @@ function Base.rand(S, N::Int, d::Int, k::Int,
   end
   return A
 end
+
 """
   A = randd(N::Int, d::Int, k::Int, r::Int,
                     [T=Float64])
 
-  Compute a core with randomized entries within the sparse block structure allowed
-  for the `k`-th core of a `d`-dimensional TT-tensor with `N` total occupation number,
-  with given ranks `row_ranks` and `col_ranks`.
+  Compute a 'diagonal' core i.e. A[:,1,:] and A[:,2,:] are diagonal and Gaussian distributed for 1<k<d.
 """
-function randd(N::Int, d::Int, k::Int, r::Int, ::Type{T}=Float64) where T<:Number
-  if k == 1
-    Ωₖ = SparseCore{T,N,d}(1, [1 for n in occupation_qn(N,d,1)], [r for n in occupation_qn(N,d,2)])
-    randn!.(Ωₖ.unoccupied)
-    randn!.(Ωₖ.occupied)
+function randd(::Val{d}, ::Val{N}, k::Int, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+  @boundscheck @assert 1<k<d
+  ω₁ = Diagonal(randn(T,r))
+  ω₂ = Diagonal(randn(T,r))
+  row_qn = occupation_qn(N,d,k)
+  col_qn = occupation_qn(N,d,k+1)
+  Ωₖ = SparseCore{T,N,d}(k, 
+                        OffsetVector([ω₁ for l in row_qn∩ col_qn    ], row_qn∩ col_qn    ),
+                        OffsetVector([ω₂ for l in row_qn∩(col_qn.-1)], row_qn∩(col_qn.-1)))
     return Ωₖ
-  elseif k == d
-    Ωₖ = SparseCore{T,N,d}(d, [r for n in occupation_qn(N,d,d)], [1 for n in occupation_qn(N,d,d+1)])
-    randn!.(Ωₖ.unoccupied)
-    randn!.(Ωₖ.occupied)
+end
+
+"""
+  A = randh(Val(d), Val(N), r::Int,
+                    [T=Float64])
+
+  Compute a 'horizontal' core i.e. A[:,1,:] and A[:,2,:] is row-shaped, for k=1.
+"""
+function randh(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+  ω₁ = randn(T,1,r)
+  ω₂ = randn(T,1,r)
+  Ωₖ = SparseCore{T,N,d}(1, 
+                        OffsetVector([ω₁], 0:0),
+                        OffsetVector([ω₂], 0:0))
     return Ωₖ
-  else # k<d
-    ω₁ = Diagonal(randn(T,r))
-    ω₂ = Diagonal(randn(T,r))
-    row_qn = occupation_qn(N,d,k)
-    col_qn = occupation_qn(N,d,k+1)
-    Ωₖ = SparseCore{T,N,d}(k, 
-                          OffsetVector([ω₁ for l in row_qn∩ col_qn    ], row_qn∩ col_qn    ),
-                          OffsetVector([ω₂ for l in row_qn∩(col_qn.-1)], row_qn∩(col_qn.-1)))
+end
+
+"""
+  A = randv(Val(d), Val(N), r::Int,
+                    [T=Float64])
+
+  Compute a 'vertical' core i.e. A[:,1,:] and A[:,2,:] is column-shaped, for k=d.
+"""
+function randv(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+  ω₁ = randn(T,r,1)
+  ω₂ = randn(T,r,1)
+  Ωₖ = SparseCore{T,N,d}(d, 
+                        OffsetVector([ω₁], N:N    ),
+                        OffsetVector([ω₂], N-1:N-1))
     return Ωₖ
-  end
 end
 
 

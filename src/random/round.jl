@@ -17,12 +17,12 @@ function roundRandOrth!(x::TTvector{T,N,d}, target_r::Vector{OffsetVector{Int,Ve
 
   # Precompute partial projections W
   Fᴸ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
-  Fᴸ[1] = IdFrame(Val(N), Val(d), 1)
+  Fᴸ[1] = IdFrame(Val(d), Val(N), 1)
   for k=1:d-1
     Fᴸ[k+1] = (adjoint(core(Ω,k)) * Fᴸ[k]) * core(x,k)
   end
 
-  Fᴿ = IdFrame(Val(N), Val(d), d+1)
+  Fᴿ = IdFrame(Val(d), Val(N), d+1)
   for k=d:-1:2
     FᴸXₖFᴿ = Fᴸ[k] * core(x,k)
     Q, = cq!(FᴸXₖFᴿ)
@@ -59,14 +59,14 @@ function roundRandOrth2!(x::TTvector{T,N,d}, m::Int) where {T<:Number,N,d}
 
   # Precompute partial projections W
   Fᴸ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
-  Fᴸ[1] = IdFrame(Val(N), Val(d), 1)
+  Fᴸ[1] = IdFrame(Val(d), Val(N), 1)
   for k=1:d-1
     # Use randomized diagonal cores (i.e. block-TT representation of m rank-one vectors) for projection
     Ωₖ = randd(N,d,k,m)
     Fᴸ[k+1] = (adjoint(Ωₖ) * Fᴸ[k]) * core(x,k)
   end
 
-  Fᴿ = IdFrame(Val(N), Val(d), d+1)
+  Fᴿ = IdFrame(Val(d), Val(N), d+1)
   for k=d:-1:2
     FᴸXₖFᴿ = Fᴸ[k] * core(x,k)
     Q, = cq!(FᴸXₖFᴿ)

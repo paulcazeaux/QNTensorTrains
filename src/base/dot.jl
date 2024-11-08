@@ -18,7 +18,7 @@ function LinearAlgebra.dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; orthogona
 
   if rank(tt1,d+1,N)==rank(tt2,d+1,N)==1
 
-  p = IdFrame(Val(N), Val(d), d+1)
+  p = IdFrame(Val(d), Val(N), d+1)
   for k=d:-1:1
     p = (core(tt2,k) * p) * adjoint(core(tt1,k))
   end

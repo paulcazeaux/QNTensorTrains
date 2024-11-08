@@ -28,14 +28,14 @@ mutable struct TTtangent{T<:Number,N,d}
 
     # Compute the left projection matrices: Pi = U^T_{k-1} ... U^T_1 W_1 ... W_{k-1}, a block-diagonal r[k] × rank(direction,k) matrix
     P = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
-    P[1] = IdFrame(Val(N), Val(d), 1)
+    P[1] = IdFrame(Val(d), Val(N), 1)
     for k=1:d-1
       P[k+1] = (adjoint(core(baseL,k)) * P[k]) * core(direction,k)
     end
 
     # Compute the right projection matrices: Q = W_{i+1} ... W_d V^T_d ... V^T_{i+1}, a direction.r[i+1] × r[i+1] matrix
     # Assemble the components of the tangent vector for i=d,...,1
-    Qₖ = IdFrame(Val(N), Val(d), d+1)
+    Qₖ = IdFrame(Val(d), Val(N), d+1)
     components = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
 
     for k=d:-1:1

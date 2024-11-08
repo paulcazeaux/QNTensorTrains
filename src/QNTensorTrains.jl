@@ -9,17 +9,16 @@ module QNTensorTrains
 using OffsetArrays, LinearAlgebra, VectorInterface, Random
 import Base: @propagate_inbounds
 
+BLAS.set_num_threads(1)
+
 
 abstract type Unfolding end
 struct Horizontal <: Unfolding end
 struct Vertical <: Unfolding end
 
-# include("base/block.jl")
 include("base/frame.jl")
 include("base/util.jl")
 include("base/sparsecore.jl")
-# include("base/sparsecoreview.jl")
-include("base/unsafesparsecore.jl")
 include("base/vector.jl")
 include("base/round.jl")
 include("base/multiplication.jl")
