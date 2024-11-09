@@ -6,7 +6,7 @@ in the Quantum Number Preserving, Block-Sparse Tensor Train format
 conserving total fermionic particle number.
 """
 module QNTensorTrains
-using OffsetArrays, LinearAlgebra, VectorInterface, Random
+using OffsetArrays, LinearAlgebra, VectorInterface, Random, TimerOutputs
 import Base: @propagate_inbounds
 
 include("base/frame.jl")

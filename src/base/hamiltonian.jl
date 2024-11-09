@@ -849,7 +849,7 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
           col_index, row_index, v = CSC.unoccupied[n].unoccupied[m]
           for j in axes(col_index,1)[begin:end-1]
             if col_index[j+1] > col_index[j]+1
-              Lj = zeros(T, size(F,1), size(X,1))
+              Lj = zeros(T, size(L,1), size(X,1))
               for index in col_index[j]:col_index[j+1]-1
                 i, α = row_index[index], v[index]
                 axpy!(α, view(L,:,I[n][i]), Lj)
@@ -890,7 +890,7 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
           col_index, row_index, v = CSC.unoccupied[n].occupied[m]
           for j in axes(col_index,1)[begin:end-1]
             if col_index[j+1] > col_index[j]+1
-              Lj = zeros(T, size(F,1), size(X,1))
+              Lj = zeros(T, size(L,1), size(X,1))
               for index in col_index[j]:col_index[j+1]-1
                 i, α = row_index[index], v[index]
                 axpy!(α, view(L,:,I[n][i]), Lj)
@@ -935,7 +935,7 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
           col_index, row_index, v = CSC.occupied[n].unoccupied[m]
           for j in axes(col_index,1)[begin:end-1]
             if col_index[j+1] > col_index[j]+1
-              Lj = zeros(T, size(F,1), size(X,1))
+              Lj = zeros(T, size(L,1), size(X,1))
               for index in col_index[j]:col_index[j+1]-1
                 i, α = row_index[index], v[index]
                 axpy!(α, view(L,:,I[n][i]), Lj)
@@ -976,7 +976,7 @@ function Base.:*(l::AdjointCore{T,N,d}, H::SparseHamiltonian{T,N,d}, x::SparseCo
           col_index, row_index, v = CSC.occupied[n].occupied[m]
           for j in axes(col_index,1)[begin:end-1]
             if col_index[j+1] > col_index[j]+1
-              Lj = zeros(T, size(F,1), size(X,1))
+              Lj = zeros(T, size(L,1), size(X,1))
               for index in col_index[j]:col_index[j+1]-1
                 i, α = row_index[index], v[index]
                 axpy!(α, view(L,:,I[n][i]), Lj)
@@ -1049,7 +1049,7 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
           row_index, col_index, v = CSR.unoccupied[n].unoccupied[m]
           for i in axes(row_index,1)[begin:end-1]
             if row_index[i+1] > row_index[i]+1
-              Ri = zeros(T, size(X,2), size(F,2))
+              Ri = zeros(T, size(X,2), size(R,2))
               for index in row_index[i]:row_index[i+1]-1
                 j, α = col_index[index], v[index]
                 axpy!(α, view(R,J[n][j],:), Ri)
@@ -1090,7 +1090,7 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
           row_index, col_index, v = CSR.unoccupied[n].occupied[m]
           for i in axes(row_index,1)[begin:end-1]
             if row_index[i+1] > row_index[i]+1
-              Ri = zeros(T, size(X,2), size(F,2))
+              Ri = zeros(T, size(X,2), size(R,2))
               for index in row_index[i]:row_index[i+1]-1
                 j, α = col_index[index], v[index]
                 axpy!(α, view(R,J[n][j],:), Ri)
@@ -1135,7 +1135,7 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
           row_index, col_index, v = CSR.occupied[n].unoccupied[m]
           for i in axes(row_index,1)[begin:end-1]
             if row_index[i+1] > row_index[i]+1
-              Ri = zeros(T, size(X,2), size(F,2))
+              Ri = zeros(T, size(X,2), size(R,2))
               for index in row_index[i]:row_index[i+1]-1
                 j, α = col_index[index], v[index]
                 axpy!(α, view(R,J[n+1][j],:), Ri)
@@ -1176,7 +1176,7 @@ function Base.:*(H::SparseHamiltonian{T,N,d}, x::SparseCore{T,N,d}, r::AdjointCo
           row_index, col_index, v = CSR.occupied[n].occupied[m]
           for i in axes(row_index,1)[begin:end-1]
             if row_index[i+1] > row_index[i]+1
-              Ri = zeros(T, size(X,2), size(F,2))
+              Ri = zeros(T, size(X,2), size(R,2))
               for index in row_index[i]:row_index[i+1]-1
                 j, α = col_index[index], v[index]
                 axpy!(α, view(R,J[n+1][j],:), Ri)
@@ -1245,7 +1245,7 @@ function RayleighQuotient(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}; ortho
 # to = TimerOutput()
 # @timeit to "Orthogonalize" begin
   if (orthogonalize)
-    leftOrthogonalize!(x)
+    QNTensorTrains.leftOrthogonalize!(x)
   end
 # end
 
@@ -1268,8 +1268,8 @@ function xᵀHy(x::TTvector{T,N,d}, H::SparseHamiltonian{T,N,d}, y::TTvector{T,N
 # to = TimerOutput()
 # @timeit to "Orthogonalize" begin
   if (orthogonalize)
-    leftOrthogonalize!(x)
-    leftOrthogonalize!(y)
+    QNTensorTrains.leftOrthogonalize!(x)
+    QNTensorTrains.leftOrthogonalize!(y)
   end
 # end
 

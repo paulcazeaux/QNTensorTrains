@@ -59,7 +59,7 @@ end
   using randomized sketches.
 """
 function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summands::Vector{TTvector{T,N,d,S}},
-                               target_r::Vector{OffsetVector{Int,Vector{Int}}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+                               target_r::Vector{OffsetVector{Int,Vector{Int}}}, to::TimerOutput) where {T<:Number,N,d,S<:AbstractMatrix{T}}
   @assert all(target_r[  1][0] == rank(x,  1,0) == 1 for x in summands)
   @assert all(target_r[d+1][N] == rank(x,d+1,N) == 1 for x in summands)
 
@@ -71,6 +71,7 @@ function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summ
   # Initialize tensor cores array for the result
   cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef,d)
 
+@timeit to "Framing" begin
   # Precompute partial projections W
   Fᴸ = Matrix{Frame{T,N,d,Matrix{T}}}(undef, length(summands), d)
 
@@ -84,15 +85,21 @@ function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summ
       Fᴸ[s,k+1] = adjoint(core(Ω,k)) * (Fᴸ[s,k] * core(summands[s],k))
     end
   end
-
+end
+@timeit to "Core assembly" begin
   SₖFᴿ = [ s == 1 ? H * core(summands[s],d) * lmul!(α[1],IdFrame(Val(d),Val(N),d+1)) : core(summands[s],d) * lmul!(α[s],IdFrame(Val(d),Val(N),d+1)) for s in axes(summands,1)]
   for k=d:-1:2
+@timeit to "Frame FᴸSₖFᴿ" begin
     FᴸSₖFᴿ = SparseCore{T,N,d}(k, Fᴸ[1,k].row_ranks, SₖFᴿ[1].col_ranks)
     for s in axes(summands,1)
       mul!(FᴸSₖFᴿ, Fᴸ[s,k], SₖFᴿ[s], 1, 1)
     end
+end
+@timeit to "CQ factorization" begin
     Q, = cq!(FᴸSₖFᴿ)
+end
     cores[k] = Q
+@timeit to "Frame SₖFᴿ" begin
     if k>2
       SₖFᴿ = [ s == 1 ? H * core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) : core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) for s in axes(summands,1)]
     else
@@ -101,7 +108,9 @@ function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summ
         mul!(cores[1], core(summands[s],1), SₖFᴿ[s] * adjoint(Q), 1, 1)
       end
     end
+end
   end
+end
 
   tt = cores2tensor(cores)
 
@@ -112,9 +121,9 @@ function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,N,d}, summ
 end
 
 
-function randRound_H_MatVecAdd(α::Vector{T}, H::SparseHamiltonian{T,N,d}, summands::Vector{TTvector{T,N,d,S}}, rmax::Int, over::Int) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+function randRound_H_MatVecAdd(α::Vector{T}, H::SparseHamiltonian{T,N,d}, summands::Vector{TTvector{T,N,d,S}}, rmax::Int, over::Int, to::TimerOutput) where {T<:Number,N,d,S<:AbstractMatrix{T}}
   target_r = [[min(rmax+over, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  return randRound_H_MatVecAdd(α,H,summands,target_r)
+  return randRound_H_MatVecAdd(α,H,summands,target_r,to)
 end
 
 """
@@ -167,7 +176,6 @@ function randRound_H_MatVec2(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, rm
   return round_global!(randRound_H_MatVec2(H, x,rmax+over), rmax=rmax)
 end
 
-using TimerOutputs
 """
   randRound_H_MatVecAdd2(α::Vector{T}, H::SparseHamiltonian{T,N,d}, x::Vector{TTvector{T,N,d}}, m::Int)
 
@@ -206,10 +214,8 @@ function randRound_H_MatVecAdd2( α::Vector{T}, H::SparseHamiltonian{T,N,d}, sum
 end
 @timeit to "Core assembly" begin
   SₖFᴿ = [ s == 1 ? 
-  (@timeit to "Randomized matvec" begin
-     H * core(summands[1],d) * lmul!(α[1],IdFrame(Val(d),Val(N),d+1)) end) : 
-  (@timeit to "SₖFᴿ" begin 
-     core(summands[s],d) * lmul!(α[s],IdFrame(Val(d),Val(N),d+1)) end) 
+     H * core(summands[1],d) * lmul!(α[1],IdFrame(Val(d),Val(N),d+1)) : 
+         core(summands[s],d) * lmul!(α[s],IdFrame(Val(d),Val(N),d+1))
         for s in axes(summands,1)]
 
   for k=d:-1:2
@@ -223,21 +229,19 @@ end
     Q, = cq!(FᴸSₖFᴿ)
 end
     cores[k] = Q
+@timeit to "Frame SₖFᴿ" begin
     if k>2
       SₖFᴿ = [ s == 1 ? 
-  (@timeit to "Randomized matvec" begin
-     H * core(summands[1],k-1) * (SₖFᴿ[1] * adjoint(Q)) end) : 
-      (@timeit to "Frame SₖFᴿ" begin 
-         core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q)) end) 
+     H * core(summands[1],k-1) * (SₖFᴿ[1] * adjoint(Q)) : 
+         core(summands[s],k-1) * (SₖFᴿ[s] * adjoint(Q))
             for s in axes(summands,1)]
     else
-    @timeit to "Frame SₖFᴿ" begin
       cores[1] = H * core(summands[1],1) * (SₖFᴿ[1] * adjoint(Q))
       for s = 2:length(summands)
         mul!(cores[1], core(summands[s],1), (SₖFᴿ[s] * adjoint(Q)), 1, 1)
       end
     end
-    end
+end
   end
 end
   tt = cores2tensor(cores)
