@@ -36,7 +36,7 @@ function ALSForwardSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner
   Fᴿ = RightToLeftFraming(H,x)
 
   λ = T(0)
-  Fᴸ = IdFrame(Val(d), Val(N), 1)
+  Fᴸ = IdFrame(Val(d), Val(Nup), Val(Ndn), 1)
   for k=1:d
     # Compute new core with iterative Lanczos
     vals, vecs, info = KrylovKit.eigsolve(
@@ -62,7 +62,7 @@ function ALSBackSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner_to
   Fᴸ = LeftToRightFraming(H,x)
 
   λ = T(0)
-  Fᴿ = IdFrame(Val(d), Val(N), d+1)
+  Fᴿ = IdFrame(Val(d), Val(Nup), Val(Ndn), d+1)
   for k=d:-1:1
     # Compute new core with iterative Lanczos
     vals, vecs, info = KrylovKit.eigsolve(
@@ -91,7 +91,7 @@ end
 function LeftToRightFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) where {T<:Number,N,d}
   # Recursive contractions to compute frame matrices and vectors from the left
   Fᴸ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
-  Fᴸ[1] = IdFrame(Val(d), Val(N), 1)
+  Fᴸ[1] = IdFrame(Val(d), Val(Nup), Val(Ndn), 1)
   for k=2:d
     Fᴸ[k] = FramingStepRight(H,x,Fᴸ[k-1])
   end
@@ -102,7 +102,7 @@ end
 function RightToLeftFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) where {T<:Number,N,d}
   # Recursive contractions to compute frame matrices and vectors from the right
   Fᴿ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
-  Fᴿ[d] = IdFrame(Val(d), Val(N), d+1)
+  Fᴿ[d] = IdFrame(Val(d), Val(Nup), Val(Ndn), d+1)
   for k=d-1:-1:1
     Fᴿ[k] = FramingStepLeft(H,x,Fᴿ[k+1])
   end

@@ -3,13 +3,11 @@
   T = Float64
   d = 10
   N = 3
+  Sz = -1//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
   X = Array(x)
   QNTensorTrains.leftOrthogonalize!(x)
-
   isapprox( norm( X - Array(x) ), 0, atol = 1e-12 * norm(X) )
 end
 
@@ -18,10 +16,11 @@ end
   T = Float64
   d = 10
   N = 3
+  Sz = 1//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
+  r = rank(x)
+
   X = Array(x)
   QNTensorTrains.leftOrthogonalize!(x, keepRank=true)
   isapprox( norm( X - Array(x) ), 0.0,  atol=1e-12 * norm(X) ) && all(all(rank(x,k) .== r[k]) for k=1:d+1)
@@ -31,14 +30,12 @@ end
 @test begin
   T = Float64
   d = 10
-  N = 3
+  N = 4
+  Sz = 0//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
   X = Array(x)
   QNTensorTrains.rightOrthogonalize!(x)
-
   isapprox( norm( X - Array(x) ), 0, atol = 1e-12 * norm(X) )
 end
 
@@ -46,27 +43,25 @@ end
 @test begin
   T = Float64
   d = 10
-  N = 3
+  N = 4
+  Sz = -2//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
+  r = rank(x)
   X = Array(x)
   QNTensorTrains.rightOrthogonalize!(x, keepRank=true)
-
   isapprox( norm( X - Array(x) ), 0.0, atol = 1e-12 * norm(X) ) && all(all(rank(x,k) .== r[k]) for k=1:d+1)
 end
 
 # Round
 @test begin
+  tol = 1e-8
   T = Float64
   d = 10
   N = 7
-  tol = 1e-8
+  Sz = -1//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
   X = Array(x)
   y = round(x, tol)
   Y = Array(y)
@@ -77,14 +72,13 @@ end
 
 # Global round
 @test begin
+  tol = 1e-8
   T = Float64
   d = 10
-  N = 7
-  tol = 1e-8
+  N = 6
+  Sz = 0//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(0:10)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,0:10)
   X = Array(x)
   y = round(x, tol; Global=true)
   Y = Array(y)

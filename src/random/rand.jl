@@ -1,43 +1,48 @@
 """
-  A = randn(N::Int, d::Int, k::Int,
-                    row_ranks::OffsetVector{Int, Vector{Int}}, 
-                    col_ranks::OffsetVector{Int, Vector{Int}},
+  A = randn(Nup::Int, Ndn::Int, d::Int, k::Int,
+                    row_ranks::Matrix{Int}, 
+                    col_ranks::Matrix{Int},
                     [T=Float64])
 
   Compute a core with randomized entries within the sparse block structure allowed
-  for the `k`-th core of a `d`-dimensional TT-tensor with `N` total occupation number,
+  for the `k`-th core of a `d`-dimensional TT-tensor with `Nup`/`Ndn` occupation numbers,
   with given ranks `row_ranks` and `col_ranks`.
 """
-function Base.randn(N::Int, d::Int, k::Int,
-                    row_ranks::OffsetVector{Int, Vector{Int}}, 
-                    col_ranks::OffsetVector{Int, Vector{Int}},
+function Base.randn(Nup::Int, Ndn::Int, d::Int, k::Int,
+                    row_ranks::Matrix{Int}, 
+                    col_ranks::Matrix{Int},
                     ::Type{T}=Float64; 
                     orthogonal = :none) where T<:Number
-  A = SparseCore{T,N,d}(k, row_ranks, col_ranks)
-
-  # (  sum(row_ranks[n]*col_ranks[n  ] for n in axes(A.unoccupied, 1))
-  #      + sum(row_ranks[n]*col_ranks[n+1] for n in axes(A.occupied,   1))
-  #     )^(-1/2)
-
-  for n in axes(A.unoccupied, 1)
-    if row_ranks[n]>0 && col_ranks[n]>0
-      σ = ( row_ranks[n]*col_ranks[n] )^(-1/2) # * binomial(d,N)/(binomial(k-1,n)*binomial(d-k,N-n)))^(-1/2)
-    else
-      σ = 1
+  A = SparseCore{T,Nup,Ndn,d}(k, row_ranks, col_ranks)
+  row_qn = state_qn(Nup,Ndn,d,k)
+  col_qn = state_qn(Nup,Ndn,d,k+1)
+  for (nup,ndn) in it_○○(A)
+    if row_ranks[nup,ndn]>0 && col_ranks[nup,ndn]>0
+      σ = ( row_ranks[nup,ndn]*col_ranks[nup,ndn] )^(-1/2)
+      randn!(○○(A,nup,ndn))
+      ○○(A,nup,ndn) .*= σ
     end
-    randn!(A[n,1,n])
-    A[n,1,n] .*= σ
-    # @show norm(A[n,1,n])
   end
-  for n in axes(A.occupied, 1)
-    if row_ranks[n]>0 && col_ranks[n+1]>0
-      σ = ( row_ranks[n]*col_ranks[n+1] )^(-1/2) # * binomial(d,N)/(binomial(k-1,n)*binomial(d-k,N-n-1)))^(-1/2)
-    else
-      σ = 1
+  for (nup,ndn) in it_up(A)
+    if row_ranks[nup,ndn]>0 && col_ranks[nup+1,ndn]>0
+      σ = ( row_ranks[nup,ndn]*col_ranks[nup+1,ndn] )^(-1/2)
+      randn!(up(A,nup,ndn))
+      up(A,nup,ndn) .*= σ
     end
-    randn!(A[n,2,n+1])
-    A[n,2,n+1] .*= σ
-    # @show norm(A[n,2,n+1])
+  end
+  for (nup,ndn) in it_dn(A)
+    if row_ranks[nup,ndn]>0 && col_ranks[nup,ndn+1]>0
+      σ = ( row_ranks[nup,ndn]*col_ranks[nup,ndn+1] )^(-1/2)
+      randn!(dn(A,nup,ndn))
+      dn(A,nup,ndn) .*= σ
+    end
+  end
+  for (nup,ndn) in it_●●(A)
+    if row_ranks[nup,ndn]>0 && col_ranks[nup+1,ndn+1]>0
+      σ = ( row_ranks[nup,ndn]*col_ranks[nup+1,ndn+1] )^(-1/2)
+      randn!(●●(A,nup,ndn))
+      ●●(A,nup,ndn) .*= σ
+    end
   end
 
   if orthogonal==:left
@@ -49,75 +54,65 @@ function Base.randn(N::Int, d::Int, k::Int,
 end
 
 """
-  A = rand(S, N::Int, d::Int, k::Int,
-                    row_ranks::OffsetVector{Int, Vector{Int}}, 
-                    col_ranks::OffsetVector{Int, Vector{Int}})
+  A = rand(S, Nup::Int, Ndn::Int, d::Int, k::Int,
+                    row_ranks::Matrix{Int}, 
+                    col_ranks::Matrix{Int})
 
   Compute a core with randomized entries in the indexable collection `S` within the sparse block structure allowed
   for the `k`-th core of a `d`-dimensional TT-tensor with `N` total occupation number,
   with given ranks `row_ranks` and `col_ranks`.
 """
-function Base.rand(S, N::Int, d::Int, k::Int,
-                    row_ranks::OffsetVector{Int, Vector{Int}}, 
-                    col_ranks::OffsetVector{Int, Vector{Int}},
+function Base.rand(S, Nup::Int, Ndn::Int, d::Int, k::Int,
+                    row_ranks::Matrix{Int}, 
+                    col_ranks::Matrix{Int},
                     ::Type{T}=Float64; 
                     orthogonal = :none) where {T<:Number}
 
   @assert eltype(S) <: Number
   @assert T == float(eltype(S))
 
+  A = SparseCore{T,Nup,Ndn,d}(k, row_ranks, col_ranks)
 
-  A = SparseCore{T,N,d}(k, row_ranks, col_ranks)
-
-  # (  sum(row_ranks[n]*col_ranks[n  ] for n in axes(A.unoccupied, 1))
-  #      + sum(row_ranks[n]*col_ranks[n+1] for n in axes(A.occupied,   1))
-  #     )^(-1/2)
-  for n in axes(A.unoccupied, 1)
-    # if row_ranks[n]>0 && col_ranks[n]>0
-    #   σ = ( row_ranks[n]*col_ranks[n] )^(-1/2) # * binomial(d,N)/(binomial(k-1,n)*binomial(d-k,N-n)))^(-1/2)
-    # else
-    #   σ = 1
-    # end
-    a = float(rand(S,row_ranks[n],col_ranks[n]))
-    r = minimum(size(a))
-    if r < 50 # Because the matrix is small, we double check the numerical rank of the sketch matrix
-      while rank(a) < r
-        a = float(rand(S,row_ranks[n],col_ranks[n]))
+  function randomize!(A)
+    for (nup,ndn) in it_○○(A)
+      if row_ranks[nup,ndn]>0 && col_ranks[nup,ndn]>0
+        a = float(rand(S,row_ranks[nup,ndn],col_ranks[nup  ,ndn  ]))
+        copyto!(○○(A,nup,ndn), a)
       end
     end
-    A[n,1,n] = a
-    # @show norm(A[n,1,n])
+    for (nup,ndn) in it_up(A)
+      if row_ranks[nup,ndn]>0 && col_ranks[nup+1,ndn]>0
+        a = float(rand(S,row_ranks[nup,ndn],col_ranks[nup+1,ndn  ]))
+        copyto!(up(A,nup,ndn), a)
+      end
+    end
+    for (nup,ndn) in it_dn(A)
+      if row_ranks[nup,ndn]>0 && col_ranks[nup,ndn+1]>0
+        a = float(rand(S,row_ranks[nup,ndn],col_ranks[nup  ,ndn+1]))
+        copyto!(dn(A,nup,ndn), a)
+      end
+    end
+    for (nup,ndn) in it_●●(A)
+      if row_ranks[nup,ndn]>0 && col_ranks[nup,ndn]>0
+        a = float(rand(S,row_ranks[nup,ndn],col_ranks[nup+1,ndn+1]))
+        copyto!(●●(A,nup,ndn), a)
+      end
+    end
   end
-  for n in axes(A.occupied, 1)
-    # if row_ranks[n]>0 && col_ranks[n+1]>0
-    #   σ = ( row_ranks[n]*col_ranks[n+1] )^(-1/2) # * binomial(d,N)/(binomial(k-1,n)*binomial(d-k,N-n-1)))^(-1/2)
-    # else
-    #   σ = 1
-    # end
-    a = float(rand(S,row_ranks[n],col_ranks[n+1]))
-    r = minimum(size(a))
-    if r < 50 # Because the matrix is small, we double check the numerical rank of the sketch matrix
-      if n ∈ axes(A.unoccupied, 1) && n+1 ∈ axes(A.unoccupied, 2)
-        while rank(hcat(A.unoccupied[n],a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1]) &&
-              rank(vcat(A.unoccupied[n+1],a)) < min(row_ranks[n]+row_ranks[n+1], col_ranks[n+1])
-          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
-        end
-      elseif n ∈ axes(A.unoccupied, 1)
-        while rank(hcat(A.unoccupied[n],a)) < min(row_ranks[n], col_ranks[n]+col_ranks[n+1])
-          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
-        end
-      elseif n+1 ∈ axes(A.unoccupied, 2)
-        while rank(vcat(A.unoccupied[n+1],a)) < min(row_ranks[n]+row_ranks[n+1],col_ranks[n+1])
-          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
-        end
-      else
-        while rank(a) < r
-          a = float(rand(S,row_ranks[n],col_ranks[n+1]))
-        end
-      end
+
+  while true
+    randomize!(a)
+    for nup in row_qn(A)
+      a = A[(nup,ndn),:vertical]
+      r = minimum(size(a))
+      r<50 && rank(a) < r && continue
     end
-    A[n,2,n+1] = a
-    # @show norm(A[n,2,n+1])
+    for nup in col_qn(A)
+      a = A[(nup,ndn),:horizontal]
+      r = minimum(size(a))
+      r<50 && rank(a) < r && continue
+    end
+    break
   end
   
   if orthogonal==:left
@@ -129,91 +124,127 @@ function Base.rand(S, N::Int, d::Int, k::Int,
 end
 
 """
-  A = randd(N::Int, d::Int, k::Int, r::Int,
+  A = randd(Val(d), Val(Nup), Val(Ndn), k::Int, r::Int,
                     [T=Float64])
 
   Compute a 'diagonal' core i.e. A[:,1,:] and A[:,2,:] are diagonal and Gaussian distributed for 1<k<d.
 """
-function randd(::Val{d}, ::Val{N}, k::Int, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+function randd(::Val{d}, ::Val{Nup}, ::Val{Ndn}, k::Int, r::Int, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
   @boundscheck @assert 1<k<d
   ω₁ = Diagonal(randn(T,r))
   ω₂ = Diagonal(randn(T,r))
-  row_qn = occupation_qn(N,d,k)
-  col_qn = occupation_qn(N,d,k+1)
-  Ωₖ = SparseCore{T,N,d}(k, 
-                        OffsetVector([ω₁ for l in row_qn∩ col_qn    ], row_qn∩ col_qn    ),
-                        OffsetVector([ω₂ for l in row_qn∩(col_qn.-1)], row_qn∩(col_qn.-1)))
+  ω₃ = Diagonal(randn(T,r))
+  ω₄ = Diagonal(randn(T,r))
+
+  row_qn = state_qn(Nup,Ndn,d,k)
+  col_qn = state_qn(Nup,Ndn,d,k+1)
+
+  ○○ = Matrix{Diagonal{T,Vector{T}}}(undef, Nup+1, Ndn+1)
+  up = Matrix{Diagonal{T,Vector{T}}}(undef, Nup+1, Ndn+1)
+  dn = Matrix{Diagonal{T,Vector{T}}}(undef, Nup+1, Ndn+1)
+  ●● = Matrix{Diagonal{T,Vector{T}}}(undef, Nup+1, Ndn+1)
+
+  for (nup,ndn) in row_qn
+    (nup  ,ndn  ) in col_qn && (○○[nup,ndn] = ω₁)
+    (nup+1,ndn  ) in col_qn && (up[nup,ndn] = ω₂)
+    (nup  ,ndn+1) in col_qn && (dn[nup,ndn] = ω₃)
+    (nup+1,ndn+1) in col_qn && (●●[nup,ndn] = ω₄)
+  end
+
+  Ωₖ = SparseCore{T,Nup,Ndn,d}(k, ○○, up, dn, ●●)
     return Ωₖ
 end
 
 """
-  A = randh(Val(d), Val(N), r::Int,
+  A = randh(Val(d), Val(N), Val(Ndn), r::Int,
                     [T=Float64])
 
   Compute a 'horizontal' core i.e. A[:,1,:] and A[:,2,:] is row-shaped, for k=1.
 """
-function randh(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+function randh(::Val{d}, ::Val{Nup}, ::Val{Ndn}, r::Int, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
   ω₁ = randn(T,1,r)
   ω₂ = randn(T,1,r)
-  Ωₖ = SparseCore{T,N,d}(1, 
-                        OffsetVector([ω₁], 0:0),
-                        OffsetVector([ω₂], 0:0))
-    return Ωₖ
+  ω₃ = randn(T,1,r)
+  ω₄ = randn(T,1,r)
+  row_qn = state_qn(Nup,Ndn,d,1)
+  col_qn = state_qn(Nup,Ndn,d,2)
+
+  ○○ = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  up = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  dn = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  ●● = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+
+  (1,1) in col_qn && (○○[1,1] = ω₁)
+  (2,1) in col_qn && (up[1,1] = ω₂)
+  (1,2) in col_qn && (dn[1,1] = ω₃)
+  (2,2) in col_qn && (●●[1,1] = ω₄)
+
+  Ωₖ = SparseCore{T,Nup,Ndn,d}(1, ○○, up, dn, ●●)
+  return Ωₖ
 end
 
 """
-  A = randv(Val(d), Val(N), r::Int,
+  A = randv(Val(d), Val(Nup), Val(Ndn),r::Int,
                     [T=Float64])
 
   Compute a 'vertical' core i.e. A[:,1,:] and A[:,2,:] is column-shaped, for k=d.
 """
-function randv(::Val{d}, ::Val{N}, r::Int, ::Type{T}=Float64) where {T<:Number,N,d}
+function randv(::Val{d}, ::Val{Nup}, ::Val{Ndn}, r::Int, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
   ω₁ = randn(T,r,1)
   ω₂ = randn(T,r,1)
-  Ωₖ = SparseCore{T,N,d}(d, 
-                        OffsetVector([ω₁], N:N    ),
-                        OffsetVector([ω₂], N-1:N-1))
-    return Ωₖ
+  ω₃ = randn(T,r,1)
+  ω₄ = randn(T,r,1)
+  row_qn = state_qn(Nup,Ndn,d,1)
+  col_qn = state_qn(Nup,Ndn,d,2)
+
+  ○○ = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  up = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  dn = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+  ●● = Matrix{Matrix{T}}(undef, Nup+1, Ndn+1)
+
+  for (nup,ndn) in row_qn
+    (nup  ,ndn  ) == (Nup,Ndn) && (○○[nup,ndn] = ω₁)
+    (nup+1,ndn  ) == (Nup,Ndn) && (up[nup,ndn] = ω₂)
+    (nup  ,ndn+1) == (Nup,Ndn) && (dn[nup,ndn] = ω₃)
+    (nup+1,ndn+1) == (Nup,Ndn) && (●●[nup,ndn] = ω₄)
+  end
+
+  Ωₖ = SparseCore{T,Nup,Ndn,d}(d, ○○, up, dn, ●●)
+  return Ωₖ
 end
 
 
 """
-    tt = tt_rand(S, Val(d), Val(N), r::Vector{OffsetVector{Int,Vector{Int}}}, [T=Float64])
+    tt = tt_rand(S, Val(d), Val(Nup), Val(Ndn), r::Vector{Matrix{Int}}, [T=Float64])
 
 Compute a d-dimensional TT-tensor with ranks `r` and entries drawn uniformly from the indexable collection `S` for the cores.
 """
-function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}},
+function tt_rand(S, ::Val{d}, ::Val{Nup}, ::Val{Ndn}, r::Vector{Matrix{Int}},
                     ::Type{T}=Float64;
-                    orthogonal=:none) where {T<:Number,N,d}
+                    orthogonal=:none) where {T<:Number,Nup,Ndn,d}
   @assert eltype(S) <: Number
   @assert T == float(eltype(S))
+  @boundscheck @assert (length(r) == d+1) || (length(r) == d-1) && all(axes(r[k]) == (1:Nup+1,1:Ndn+1) for k=1:length(r))
 
-  @boundscheck (length(r) == d+1) || (length(r) == d-1)
-  for k=1:d+1
-    @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
-  end
+  cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
 
-  tt = tt_zeros(Val(d),Val(N),T)
   if length(r) == d+1
     for k=1:d
-      @boundscheck axes(r[k],1) == axes(core(tt,k),1)
+      cores[k] = rand(S, Nup,Ndn,d,k,rank(tt,k),rank(tt,k+1), orthogonal=orthogonal)
     end
-    @boundscheck axes(r[d+1],1) == axes(core(tt,d),3)
-    tt.r .= r
-    for k=1:d
-      C = rand(S, N,d,k,rank(tt,k),rank(tt,k+1), orthogonal=orthogonal)
-      set_core!(tt, C)
-    end
-
   else # length(r) == d-1
-    for k=1:d-1
-      @boundscheck axes(r[k],1) == axes(core(tt,k+1),1)
+    r1 = zeros(Int,Nup+1,Ndn+1)
+    r1[1,1] = 1
+    cores[1] = rand(S, Nup,Ndn,d,k,r1,r[1], orthogonal=orthogonal)
+    for k=2:d-1
+      cores[k] = rand(S, Nup,Ndn,d,k,r[k-1],r[k], orthogonal=orthogonal)
     end
-    tt.r[2:d] .= r
-    for k=1:d
-      set_core!(tt, rand(S, N,d,k,rank(tt,k),rank(tt,k+1), orthogonal=orthogonal))
-    end
+    rd = zeros(Int,Nup+1,Ndn+1)
+    rd[Nup+1,Ndn+1] = 1
+    cores[d] = rand(S, Nup,Ndn,d,k,r[d-1],rd, orthogonal=orthogonal)
   end
+  tt = cores2tensor(cores)
+
   if orthogonal==:right
     tt.orthogonal = true
     tt.corePosition = 1
@@ -228,38 +259,32 @@ function tt_rand(S, ::Val{d}, ::Val{N},  r::Vector{OffsetVector{Int,Vector{Int}}
 end
 
 """
-    tt = tt_randn(Val(d), Val(N), r::Vector{OffsetVector{Int,Vector{Int}}}, [T=Float64])
+    tt = tt_randn(Val(d), Val(Nup), Val(Ndn), r::Vector{Matrix{Int}}, [T=Float64])
 
 Compute a d-dimensional TT-tensor with ranks `r` and Gaussian distributed entries for the cores.
 """
-function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64;
-      orthogonal=:none) where {T<:Number,N,d}
-  @boundscheck (length(r) == d+1)
-  for k=1:d+1
-    @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
-  end
+function tt_randn(::Val{d},::Val{Nup}, ::Val{Ndn}, r::Vector{Matrix{Int}}, ::Type{T}=Float64;
+      orthogonal=:none) where {T<:Number,Nup,Ndn,d}
+  @boundscheck @assert (length(r) in (d-1,d+1)) && all(axes(r[k]) == (1:Nup+1,1:Ndn+1) for k=1:length(r))
 
-  tt = tt_zeros(Val(d),Val(N),T)
+  cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
+
   if length(r) == d+1
     for k=1:d
-      @boundscheck axes(r[k],1) == axes(core(tt,k),1)
+      cores[k] = randn(Nup,Ndn,d,k,r[k],r[k+1], orthogonal=orthogonal)
     end
-    @boundscheck axes(r[d+1],1) == axes(core(tt,d),3)
-    tt.r .= r
-    for k=1:d
-      C = randn(N,d,k,rank(tt,k),rank(tt,k+1),T,orthogonal=orthogonal)
-      set_core!(tt, C)
-    end
-
   else # length(r) == d-1
-    for k=1:d-1
-      @boundscheck axes(r[k],1) == axes(core(tt,k+1),1)
+    r1 = zeros(Int,Nup+1,Ndn+1)
+    r1[1,1] = 1
+    cores[1] = randn(Nup,Ndn,d,k,r1,r[1], orthogonal=orthogonal)
+    for k=2:d-1
+      cores[k] = randn(Nup,Ndn,d,k,r[k-1],r[k], orthogonal=orthogonal)
     end
-    tt.r[2:d] .= r
-    for k=1:d
-      set_core!(tt, randn(N,d,k,rank(tt,k),rank(tt,k+1),T,orthogonal=orthogonal))
-    end
+    rd = zeros(Int,Nup+1,Ndn+1)
+    rd[Nup+1,Ndn+1] = 1
+    cores[d] = randn(Nup,Ndn,d,k,r[d-1],rd, orthogonal=orthogonal)
   end
+  tt = cores2tensor(cores)
 
   if orthogonal==:right
     tt.orthogonal = true
@@ -275,44 +300,42 @@ function tt_randn(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, 
 end
 
 """
-    tt_out = perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int}}}, [ϵ::Float64 = 1e-4])
+    tt_out = perturbation(tt::TTvector{T,Nup,Ndn,d}, r::Vector{Matrix{Int}}, [ϵ::Float64 = 1e-4])
 
 Compute a d-dimensional TT-tensor perturbation of `tt` with ranks at least `r` and Gaussian distributed entries for the cores.
 """
-function perturbation(tt::TTvector{T,N,d}, r::Vector{OffsetVector{Int,Vector{Int}}}, ϵ::Float64 = 1e-4) where {T<:Number,N,d}
-  @boundscheck (length(r) == d+1) || (length(r) == d-1)
-  for k=1:d+1
-    @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
-  end
+function perturbation(tt::TTvector{T,Nup,Ndn,d}, r::Vector{Matrix{Int}}, ϵ::Float64 = 1e-4) where {T<:Number,Nup,Ndn,d}
+  @boundscheck @assert (length(r) in (d-1,d+1)) && all(axes(r[k]) == (1:Nup+1,1:Ndn+1) for k=1:length(r))
 
   rp = deepcopy(rank(tt))
 
   if length(r) == d+1
     for k=1:d+1
-      @boundscheck axes(r[k],1) == axes(rank(tt,k),1)
-      for n in axes(r[k],1)
-        rp[k][n] = max(1, r[k][n] - rank(tt,k,n))
+      for (nup,ndn) in state_qn(Nup,Ndn,d,k)
+        rp[k][nup,ndn] = max(1, r[k][nup,ndn] - rank(tt,k,nup,ndn))
       end
     end
   else # length(r) == d-1
     for k=2:d
-      @boundscheck axes(r[k-1],1) == axes(rank(tt,k),1)
-      for n in axes(r[k-1],1)
-        rp[k][n] = max(1, r[k-1][n] - rank(tt,k,n))
+      for (nup,ndn) in state_qn(Nup,Ndn,d,k)
+        rp[k][nup,ndn] = max(1, r[k-1][nup,ndn] - rank(tt,k,nup,ndn))
       end
     end
   end
-  p = tt_randn(Val(d),Val(N),rp)
+  p = tt_randn(Val(d),Val(Nup),Val(Ndn),rp)
   lmul!(ϵ*norm(tt)/norm(p), p)
   return tt + p
 end
 
 """
-    tt_out = perturbation(tt::TTvector{T,N,d}, r::Int, [ϵ::Float64 = 1e-4])
+    tt_out = perturbation(tt::TTvector{T,Nup,Ndn,d}, R::Int, [ϵ::Float64 = 1e-4])
 
-Compute a d-dimensional TT-tensor perturbation of `tt` with all block ranks at least `r` and Gaussian distributed entries for the cores.
+Compute a d-dimensional TT-tensor perturbation of `tt` with all block ranks at least `R` and Gaussian distributed entries for the cores.
 """
-function perturbation(tt::TTvector{T,N,d}, r::Int, ϵ::Float64 = 1e-4) where {T<:Number,N,d}
-  r = [ [(2≤k≤d ? r : 1) for n in axes(rank(tt,k),1)] for k=1:d+1]
+function perturbation(tt::TTvector{T,Nup,Ndn,d}, R::Int, ϵ::Float64 = 1e-4) where {T<:Number,Nup,Ndn,d}
+  r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  for k=2:d, (nup,ndn) in state_qn(Nup,Ndn,d,k)
+    r[k][nup,ndn] = R
+  end
   return perturbation(tt,r,ϵ)
 end

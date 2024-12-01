@@ -3,17 +3,17 @@
 T = Float64
 d = 10
 N = 6
+Sz = 2//2
 
-r = [ [ (k in (1,d+1) ? 1 : rand(1:6)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(Val(d),Val(N),r)
+x0 = randomized_state(d, N, Sz, 1:6)
 
 for i=1:d, j=1:d
   @test begin
     tij = randn()
-    x = tij * AdagᵢAⱼ(x0, i, j)
+    x = tij * (AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up)) + AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn)))
 
-    t = zeros(d,d); v = zeros(d,d,d,d);
-    t[i,j] = tij; sH = SparseHamiltonian(t,v,Val(N),Val(d));
+    t = zeros(d,d); v = zeros(d,d,d,d)
+    t[i,j] = tij; sH = SparseHamiltonian(t,v,N,Sz,d)
     y = sH * x0
     z = x-y
 
@@ -26,16 +26,25 @@ end
 T = Float64
 d = 6
 N = 2
+Sz = 0//2
 
-r = [ [ (k in (1,d+1) ? 1 : rand(1:6)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(Val(d),Val(N),r)
+x0 = randomized_state(d, N, Sz, 1:6)
 
-for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d #j=((1:i-1) ∪ (i+1:d)), k=1:d-1, l=((1:k-1) ∪ (k+1:d))
+
+for i=1:d, j=1:d, k=1:d, l=1:d
   @test begin
-    tijkl = exp(randn())
-    x = ((i<j ? 1 : -1) * (k<l ? 1 : -1) * tijkl) * AdagᵢAdagⱼAₖAₗ(x0, min(i,j), max(i,j), min(k,l), max(k,l))
-    t = zeros(d,d); v = zeros(d,d,d,d);
-    v[i,j,k,l] = tijkl; sH = SparseHamiltonian(t,v,Val(N),Val(d));
+    wijkl = exp(randn())
+    x = tt_zeros(d,N,Sz,T)
+    for σ1 in (Up,Dn), σ2 in (Up,Dn)
+      Oi, Oj, Ok, Ol = (site=i,spin=σ1), (site=j,spin=σ1), (site=k,spin=σ2), (site=l,spin=σ2)
+      if Oi ≠ Ok && Oj ≠ Ol
+        x += AdagᵢAdagⱼAₖAₗ(x0, Oi, Oj, Ok, Ol)
+      end
+    end
+    lmul!(wijkl, x)
+
+    t = zeros(d,d); v = zeros(d,d,d,d)
+    v[i,j,k,l] = wijkl; sH = SparseHamiltonian(t,v,N,Sz,d)
     y = sH * x0
     z = x-y
 

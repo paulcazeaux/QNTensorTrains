@@ -9,6 +9,15 @@ module QNTensorTrains
 using OffsetArrays, LinearAlgebra, VectorInterface, Random, TimerOutputs
 import Base: @propagate_inbounds
 
+abstract type AbstractCore{T<:Number,Nup,Ndn,d} <: AbstractArray{T,3} end
+abstract type AbstractAdjointCore{T<:Number,Nup,Ndn,d} <: AbstractArray{T,3} end
+abstract type AbstractFrame{T<:Number,Nup,Ndn,d} <: AbstractArray{T,2} end
+abstract type FrameView{T,Nup,Ndn,d} <: AbstractFrame{T,Nup,Ndn,d} end
+abstract type SparseCoreView{T,Nup,Ndn,d} <: AbstractCore{T,Nup,Ndn,d} end
+
+@enum Spin Up=1 Dn=-1
+const Orbital = @NamedTuple{site::Int, spin::Spin}
+
 include("base/frame.jl")
 include("base/util.jl")
 include("base/sparsecore.jl")
@@ -31,7 +40,7 @@ include("base/elementaryops.jl")
 include("base/hamiltonian.jl")
 
 export Adag, A, AdagA, S, Id
-export AdagᵢAⱼ, AdagᵢAdagⱼAₖAₗ
+export AdagᵢAⱼ, AdagᵢAdagₖAₗAⱼ
 
 using .Hamiltonian
 export SparseHamiltonian, H_matvec_core, H_matvec, RayleighQuotient, xᵀHy

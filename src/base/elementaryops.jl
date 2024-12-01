@@ -2,251 +2,616 @@
 ### Implement two-body second quantization operators ###
 ########################################################
 
-"""
-  Adag(A, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
 
-Implements second quantization creation operator :math: (a_k^*) on core `k`,
-assuming the quantum number flux in the chain up to core 'k' is `flux`, 
-and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k` (included).
 """
-function Adag(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  Adag(A, spin, flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements second quantization creation operator :math: (a_k↑↓^*) on core `k`,
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function Adag(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
+              flux_up::Int, nl_up::Int, nr_up::Int, 
+              flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
 
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr-1` electrons to the right of core `k` (excluded) by 
-  # allowing only certain rows and columns
+  ql, rowranks = shift_ranks(row_qn(A), row_ranks(A), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
 
-  ql, row_ranks = shift_ranks(A.row_ranks, flux, nl, nr, N)
-  qr, col_ranks = shift_ranks(A.col_ranks, flux+1, nl+1, nr-1, N)
-  B = SparseCore{T,N,d}(k,row_ranks,col_ranks)
+  if spin == Up
+    # Ensure that there is room for `nl_up` spin up electrons to the left of core `k`
+    # as well as `nr_up-1` spin up electrons to the right of core `k` (excluded) by 
+    # allowing only certain rows and columns
 
-  for l in axes(A,1) ∩ (axes(A,3).-1) ∩ ql ∩ (qr.-1)
-    B[l,2,l+1] = A[l-flux,1,l-flux]
+    qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+ldn) ? -1 : 1
+      if (lup+1,ldn) in col_qn(A) ∩ qr
+        up(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        ●●(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn
+
+  elseif spin == Dn
+    # Ensure that there is room for `nl_dn` spin down electrons to the left of core `k`
+    # as well as `nr_dn-1` spin down electrons to the right of core `k` (excluded) by 
+    # allowing only certain rows and columns
+
+    qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      if (lup,ldn+1) in col_qn(A) ∩ qr
+        jw = isodd(lup+ldn) ? -1 : 1
+        dn(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        jw = isodd(lup+1+ldn) ? -1 : 1
+        ●●(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1
   end
-
-  return B, flux+1, nl+1, nr-1
 end
 
-"""
-  A(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
 
-Implements second quantization annihilation operator :math: (a_k) on core `k`,
-assuming the quantum number flux in the chain up to core 'k' is `flux`, 
-and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k`.
 """
-function A(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  A(A, spin::Spin, flux_up::Int, nl_up::Int, nr_up::Int, 
+                   flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements second quantization annihilation operator :math: (a_k↑) on core `k`,
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function A(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin, 
+                flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
 
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr` electrons to the right of core `k` (excluded) by 
+
+  ql, rowranks = shift_ranks(row_qn(A), row_ranks(A), Nup, Ndn, flux_up,   nl_up,   nr_up,   flux_dn, nl_dn, nr_dn)
+  if spin==Up
+  # Ensure that there is room for `nl_up` spin up electrons to the left of core `k`
+  # as well as `nr_up-1` spin up electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
+    qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up-1, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+    B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
 
-  ql, row_ranks = shift_ranks(A.row_ranks, flux,   nl, nr, N)
-  qr, col_ranks = shift_ranks(A.col_ranks, flux-1, nl, nr, N)
-  B = SparseCore{T,N,d}(k,row_ranks,col_ranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+ldn) ? -1 : 1
+      if (lup,ldn) in col_qn(A) ∩ qr
+        ○○(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup,ldn+1) in col_qn(A) ∩ qr
+        dn(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
 
-  for l in axes(B,1) ∩ axes(B,3) ∩ ql ∩ qr
-    B[l,1,l] = A[l-flux,2,l-flux+1]
+    return B, flux_up-1, nl_up, nr_up, flux_dn, nl_dn, nr_dn
+  elseif spin==Dn
+    # Ensure that there is room for `nl_up` spin up electrons to the left of core `k`
+    # as well as `nr_up-1` spin up electrons to the right of core `k` (excluded) by 
+    # allowing only certain rows and columns
+    qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn-1, nl_dn, nr_dn)
+    B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
+
+    for (lup,ldn) in row_qn(A) ∩ ql
+      if (lup,ldn) in col_qn(A) ∩ qr
+        jw = isodd(lup+ldn) ? -1 : 1
+        ○○(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup+1,ldn) in col_qn(A) ∩ qr
+        jw = isodd(lup+1+ldn) ? -1 : 1
+        up(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+
+    return B, flux_up, nl_up, nr_up, flux_dn-1, nl_dn, nr_dn
   end
-
-  return B, flux-1, nl, nr
 end
 
 """
-  AdagA(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  AdagupAdagdn(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+                  flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
 
-Implements annihilation/creation block :math: (a^*_ka_k) on core `k`.
-assuming the quantum number flux in the chain up to core 'k' is `flux`, 
-and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k` (included).
+Implements second quantization creation operator :math: (a_k↑^*a_k↓^*) on core `k`,
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
 """
-function AdagA(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+function AdagupAdagdn(A::SparseCore{T,Nup,Ndn,d,M}, 
+                flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
 
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr-1` electrons to the right of core `k` (excluded) by 
+  # Ensure that there is room for `nl_dn` spin down electrons to the left of core `k`
+  # as well as `nr_dn-1` spin down electrons to the right of core `k` (excluded) by 
   # allowing only certain rows and columns
-  ql, row_ranks = shift_ranks(A.row_ranks, flux, nl, nr, N)
-  qr, col_ranks = shift_ranks(A.col_ranks, flux, nl+1, nr-1, N)
-  B = SparseCore{T,N,d}(k, row_ranks, col_ranks)
 
-  for l in axes(B,1) ∩ (axes(B,3).-1) ∩ ql ∩ (qr.-1)
-    B[l,2,l+1] = A[l-flux,2,l-flux+1]
+  ql, rowranks = shift_ranks(row_qn(A), row_ranks(A), Nup, Ndn, flux_up,   nl_up,   nr_up,   flux_dn,   nl_dn,   nr_dn  )
+  qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up+1, nl_up+1, nr_up-1, flux_dn+1, nl_dn+1, nr_dn-1)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup+1,ldn+1) in col_qn(A) ∩ qr
+      ●●(B,lup,ldn) .= ○○(A,lup-flux_up,ldn-flux_dn)
+    end
   end
 
-  return B, flux, nl+1, nr-1
+  return B, flux_up+1, nl_up+1, nr_up-1, flux_dn+1, nl_dn+1, nr_dn-1
 end
 
 """
-  S(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  AupAdn(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+            flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
 
-Implements Jordan-Wigner component :math: (s_k) on core `k`,
-assuming the quantum number flux in the chain up to core 'k' is `flux` and odd, 
-and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k`.
+Implements second quantization annihilation operator :math: (a_k↑a_k↓) on core `k`,
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
 """
-function S(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+function AupAdn(A::SparseCore{T,Nup,Ndn,d,M}, 
+                flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
-  @assert isodd(flux)
 
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr` electrons to the right of core `k` (excluded) by 
-  # allowing only certain rows and columns
-  ql, row_ranks = shift_ranks(A.row_ranks, flux, nl, nr, N)
-  qr, col_ranks = shift_ranks(A.col_ranks, flux, nl, nr, N)
-  B = SparseCore{T,N,d}(k, row_ranks, col_ranks)
+  ql, rowranks = shift_ranks(row_qn(A), row_ranks(A), Nup, Ndn, flux_up,   nl_up, nr_up, flux_dn,   nl_dn, nr_dn)
+  qr, colranks = shift_ranks(col_qn(A), col_ranks(A), Nup, Ndn, flux_up-1, nl_up, nr_up, flux_dn-1, nl_dn, nr_dn)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup,ldn) in col_qn(A) ∩ qr
+      ○○(B,lup,ldn) .= (-1) .* ●●(A,lup-flux_up,ldn-flux_dn)
+    end
+  end
 
-  for l in axes(B,1) ∩ axes(B,3) ∩ ql ∩ qr
-    B[l,1,l] = A[l-flux,1,l-flux]
-  end
-  for l ∈ axes(B,1) ∩ (axes(B,3).-1) ∩ ql ∩ (qr.-1)
-    B[l,2,l+1] = A[l-flux,2,l-flux+1]
-    lmul!(-1, B[l,2,l+1])
-  end
-  return B, flux, nl, nr
+  return B, flux_up-1, nl_up, nr_up, flux_dn-1, nl_dn, nr_dn
 end
 
 """
-  Id(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  N(A, spin::Spin, flux_up::Int, nl_up::Int, nr_up::Int, 
+                           flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements spin-polarized number operator :math: (a_k↑^*a_k↑) or :math: (a_k↓^*a_k↓) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function N(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin, 
+                flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  if spin==Up
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      if (lup+1,ldn) in col_qn(A) ∩ qr
+        up(B,lup,ldn) .= up(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        ●●(B,lup,ldn) .= ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn
+
+  elseif spin==Dn
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn+1, nr_dn-1)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      if (lup,ldn+1) in col_qn(A) ∩ qr
+        dn(B,lup,ldn) .= dn(A,lup-flux_up,ldn-flux_dn)
+      end
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        ●●(B,lup,ldn) .= ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up, nl_up, nr_up, flux_dn, nl_dn+1, nr_dn-1
+  end
+end
+
+"""
+  S₊(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+        flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements J₊ ladder operator :math: (a_k↑^*a_k↓) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function S₊(A::SparseCore{T,Nup,Ndn,d,M}, 
+              flux_up::Int, nl_up::Int, nr_up::Int, 
+              flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up,   nl_up,   nr_up,   flux_dn,   nl_dn, nr_dn)
+  qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up+1, nl_up+1, nr_up-1, flux_dn-1, nl_dn, nr_dn)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup+1,ldn) in col_qn(A) ∩ qr
+      up(B,lup,ldn) .= dn(A,lup-flux_up,ldn-flux_dn)
+    end
+  end
+
+  return B, flux_up+1, nl_up+1, nr_up-1, flux_dn-1, nl_dn, nr_dn
+end
+
+
+"""
+  S₋(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+               flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements J₋ ladder operator :math: (a_k↑a_k↓^*) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function S₋(A::SparseCore{T,Nup,Ndn,d,M}, 
+              flux_up::Int, nl_up::Int, nr_up::Int, 
+              flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up,   nl_up, nr_up, flux_dn,   nl_dn,   nr_dn  )
+  qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up-1, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup,ldn+1) in col_qn(A) ∩ qr
+      dn(B,lup,ldn) .= (-1) .* up(A,lup-flux_up,ldn-flux_dn)
+    end
+  end
+
+  return B, flux_up-1, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1
+end
+
+"""
+  AN(A, spin::Spin, flux_up::Int, nl_up::Int, nr_up::Int, 
+                    flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements density times annihilation operator with spin `spin` :math: (a_k↑^*a_k↑a_k↓) (`spin`=`up`) or :math: (a_k↑a_k↓^*a_k↓) (`spin`=`dn`) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function AN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
+                      flux_up::Int, nl_up::Int, nr_up::Int, 
+                      flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  if spin == Up
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up-1, nl_up, nr_up, flux_dn, nl_dn+1, nr_dn-1)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+ldn) ? -1 : 1
+      if (lup,ldn+1) in col_qn(A) ∩ qr
+        dn(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up-1, nl_up, nr_up, flux_dn, nl_dn+1, nr_dn-1
+  elseif spin == Dn
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up+1, nr_up-1, flux_dn-1, nl_dn, nr_dn)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+1+ldn) ? -1 : 1
+      if (lup+1,ldn) in col_qn(A) ∩ qr
+        up(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up, nl_up+1, nr_up-1, flux_dn-1, nl_dn, nr_dn
+  end
+end
+
+
+"""
+  AdagN(A, spin::Spin, 
+           flux_up::Int, nl_up::Int, nr_up::Int, 
+           flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements density times creation operator with spin `spin` :math: (a_k↑^*a_k↑a_k↓^*) (`spin`=`dn`) or :math: (a_k↑^*a_k↓^*a_k↓) (`spin`=`up`) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function AdagN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
+                flux_up::Int, nl_up::Int, nr_up::Int, 
+                flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  if spin==Dn
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up+1, nr_up-1, flux_dn+1, nl_dn+1, nr_dn-1)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+1+ldn) ? -1 : 1
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        ●●(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up, nl_up+1, nr_up-1, flux_dn+1, nl_dn+1, nr_dn-1
+  elseif spin==Up
+    qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn+1, nr_dn-1)
+    
+    B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+    for (lup,ldn) in row_qn(A) ∩ ql
+      jw = isodd(lup+ldn) ? -1 : 1
+      if (lup+1,ldn+1) in col_qn(A) ∩ qr
+        ●●(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
+      end
+    end
+    return B, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn+1, nr_dn-1
+  end
+end
+
+"""
+  NN(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+            flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+
+Implements spin up+down density operator :math: (a_k↑^*a_k↑a_k↓^*a_k↓) on core `k`.
+assuming the quantum number fluxes in the chain up to core 'k' are `flux_up` and `flux_dn`, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
+"""
+function NN(A::SparseCore{T,Nup,Ndn,d,M}, 
+                            flux_up::Int, nl_up::Int, nr_up::Int, 
+                            flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  k = A.k
+  @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
+
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up, nl_up,   nr_up,   flux_dn, nl_dn,   nr_dn  )
+  qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up+1, nr_up-1, flux_dn, nl_dn+1, nr_dn-1)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup+1,ldn+1) in col_qn(A) ∩ qr
+      ●●(B,lup,ldn) .= ●●(A,lup-flux_up,ldn-flux_dn)
+    end
+  end
+
+  return B, flux_up, nl_up+1, nr_up-1, flux_dn, nl_dn+1, nr_dn-1
+end
+
+"""
+  Id(A, flux_up::Int, nl_up::Int, nr_up::Int, 
+        flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
 
 Implements Identity component :math: (i_k) on core `k`,
-assuming the quantum number flux in the chain up to core 'k' is `flux` and even, 
-and we must fit `nl` electrons to the left and `nr` electrons to the right of core `k`.
+assuming the quantum number flux in the chain up to core 'k' is `flux=flux_up+flux_dn` and even, 
+and we must fit `nl_up`/`nr_dn` electrons to the left and `nr_up`/`nr_dn` electrons to the right of core `k` (included).
 """
-function Id(A::SparseCore{T,N,d,M}, flux::Int, nl::Int, nr::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+function Id(A::SparseCore{T,Nup,Ndn,d,M},
+            flux_up::Int, nl_up::Int, nr_up::Int, 
+            flux_dn::Int, nl_dn::Int, nr_dn::Int) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   k = A.k
   @boundscheck 1 ≤ k ≤ d || throw(BoundsError(A))
-  @assert iseven(flux)
 
-  # Ensure that there is room for `nl` electrons to the left of core `k`
-  # as well as `nr` electrons to the right of core `k` (excluded) by 
-  # allowing only certain rows and columns
-  ql, row_ranks = shift_ranks(A.row_ranks, flux, nl, nr, N)
-  qr, col_ranks = shift_ranks(A.col_ranks, flux, nl, nr, N)
-  B = SparseCore{T,N,d}(k, row_ranks, col_ranks)
-
-  for l in axes(B,1) ∩ axes(B,3) ∩ ql ∩ qr
-    B[l,1,l] = A[l-flux,1,l-flux]
+  ql, rowranks = shift_ranks(row_qn(A), A.row_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  qr, colranks = shift_ranks(col_qn(A), A.col_ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  
+  B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
+  for (lup,ldn) in row_qn(A) ∩ ql
+    if (lup,ldn) in col_qn(A) ∩ qr
+      ○○(B,lup,ldn) .= ○○(A,lup-flux_up,ldn-flux_dn)
+    end
+    if (lup+1,ldn  ) in col_qn(A) ∩ qr
+      up(B,lup,ldn) .= up(A,lup-flux_up,ldn-flux_dn)
+    end
+    if (lup  ,ldn+1) in col_qn(A) ∩ qr
+      dn(B,lup,ldn) .= dn(A,lup-flux_up,ldn-flux_dn)
+    end
+    if (lup+1,ldn+1) in col_qn(A) ∩ qr
+      ●●(B,lup,ldn) .= ●●(A,lup-flux_up,ldn-flux_dn)
+    end
   end
-  for l ∈ axes(B,1) ∩ (axes(B,3).-1) ∩ ql ∩ (qr.-1)
-    B[l,2,l+1] = A[l-flux,2,l-flux+1]
-  end
-
-  return B, flux, nl, nr
+  return B, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn
 end
 
 
-function AdagᵢAⱼ(tt_in::TTvector{T,N,d,M}, i::Int, j::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  @boundscheck 1 ≤ i ≤ d && 1 ≤ j ≤ d
+function AdagᵢAⱼ(tt_in::TTvector{T,Nup,Ndn,d,M}, i::Orbital, j::Orbital, t::T=T(1)) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  @boundscheck 1 ≤ i.site ≤ d && 1 ≤ j.site ≤ d && i.spin == j.spin
 
-  flux = 0
-  nl = 0
-  nr = 1
-
-  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
-  ranks = deepcopy(rank(tt_in))
-
-  shift_ranks!(ranks[1], rank(tt_in, 1), flux, nl, nr, N)
-  for n=1:d
-    if n == i && n == j
-      cores[n], flux, nl, nr = AdagA(core(tt_in,n), flux, nl, nr)
-    elseif n == i # Creation operator
-      cores[n], flux, nl, nr = Adag( core(tt_in,n), flux, nl, nr)
-    elseif n == j # Annihilation operator
-      cores[n], flux, nl, nr = A(    core(tt_in,n), flux, nl, nr)
-    elseif isodd(flux)
-      cores[n], flux, nl, nr = S(    core(tt_in,n), flux, nl, nr)
-    else # if iseven(flux)
-      cores[n], flux, nl, nr = Id(   core(tt_in,n), flux, nl, nr)
+  # Corner case
+  if (i.spin == Up && Nup < 1) || (i.spin == Dn && Ndn < 1)
+    return tt_zeros(Val(d),Val(Nup),Val(Ndn),T)
+  else 
+    if i.spin == j.spin == Up
+      spin = Up
+      flux_up, nl_up, nr_up= 0, 0, 1
+      flux_dn, nl_dn, nr_dn= 0, 0, 0
+    elseif i.spin == j.spin == Dn
+      spin = Dn
+      flux_up, nl_up, nr_up= 0, 0, 0
+      flux_dn, nl_dn, nr_dn= 0, 0, 1
     end
-    # Adjust row ranks using flux to determine shift
-    shift_ranks!(ranks[n+1], rank(tt_in, n+1), flux, nl, nr, N)
-  end
 
-  tt_out = TTvector(ranks, cores)
-  # Sanity check for the ranks
-  check(tt_out)
-  return tt_out
+    cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
+    ranks = deepcopy(rank(tt_in))
+
+    for site=1:d
+      # Adjust row ranks using flux to determine shift
+      shift_ranks!(row_qn(core(tt_in,site)), ranks[site], rank(tt_in, site), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+
+      if site == i.site == j.site # Density operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = N(    core(tt_in,site), spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site            # Creation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = Adag( core(tt_in,site), spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == j.site            # Annihilation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = A(    core(tt_in,site), spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      else
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = Id(   core(tt_in,site),       flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      end
+    end
+    shift_ranks!(col_qn(core(tt_in,d)), ranks[d+1], rank(tt_in, d+1), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+    tt_out = lmul!(ε(i,j)*t, TTvector(ranks, cores))
+    # Sanity check for the ranks
+    check(tt_out)
+    return tt_out
+  end
 end
 
-
-function AdagᵢAdagⱼAₖAₗ(tt_in::TTvector{T,N,d,M}, i::Int, j::Int, k::Int, l::Int) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  @boundscheck 1 ≤ i < j ≤ d && 1 ≤ k < l ≤ d
-
-  flux = 0
-  nl = 0
-  nr = 2
-
-  cores = Vector{SparseCore{T,N,d,Matrix{T}}}(undef, d)
-  ranks = deepcopy(rank(tt_in))
-
-  for n=1:d
-    shift_ranks!(ranks[n], rank(tt_in, n), flux, nl, nr, N)
-
-    if n ∈ (i,j)∩(k,l)
-      cores[n], flux, nl, nr = AdagA(core(tt_in,n), flux, nl, nr)
-    elseif n ∈ (i,j) # Creation operator
-      cores[n], flux, nl, nr = Adag( core(tt_in,n), flux, nl, nr)
-    elseif n ∈ (k,l) # Annihilation operator
-      cores[n], flux, nl, nr = A(    core(tt_in,n), flux, nl, nr)
-    elseif isodd(flux)
-      cores[n], flux, nl, nr = S(    core(tt_in,n), flux, nl, nr)
-    else # if iseven(flux)
-      cores[n], flux, nl, nr = Id(   core(tt_in,n), flux, nl, nr)
-    end
+function AdagᵢAdagₖAₗAⱼ(tt_in::TTvector{T,Nup,Ndn,d,M}, i::Orbital, j::Orbital, k::Orbital, l::Orbital, w::T=T(1)) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  @boundscheck begin
+    @assert i.spin == j.spin && k.spin == l.spin
+    @assert i≠k && j≠l
   end
 
-  shift_ranks!(ranks[d+1], rank(tt_in, d+1), flux, nl, nr, N)
+   # Corner case
+  if (i.spin == k.spin == Up && Nup < 2) || (i.spin == k.spin == Dn && Ndn < 2) || (i.spin ≠ k.spin && (Nup < 1 || Ndn < 1))
+    @show "bip", i, j, k, l, Nup, Ndn
+    return tt_zeros(Val(d),Val(Nup),Val(Ndn),T)
+  else
+    cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
+    ranks = deepcopy(rank(tt_in))
 
-  tt_out = TTvector(ranks, cores)
-  # Sanity check for the ranks
-  check(tt_out)
+    flux_up, nl_up, nr_up = 0, 0, (i.spin == Up ? 1 : 0) + (k.spin == Up ? 1 : 0)
+    flux_dn, nl_dn, nr_dn = 0, 0, (i.spin == Dn ? 1 : 0) + (k.spin == Dn ? 1 : 0)
 
-  return tt_out
+    for site=1:d
+      shift_ranks!(row_qn(core(tt_in,site)), ranks[site], rank(tt_in, site), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+
+      if     site == i.site == j.site == k.site == l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = NN(    core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site == j.site == k.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AdagN( core(tt_in,site), k.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site == j.site           == l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AN(    core(tt_in,site), l.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site ==           k.site == l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AdagN( core(tt_in,site), i.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==           j.site == k.site == l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AN(    core(tt_in,site), j.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site == j.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = N(     core(tt_in,site), i.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==                     k.site == l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = N(     core(tt_in,site), k.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site ==                     l.site
+        if i.spin == l.spin
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = N(   core(tt_in,site), i.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        elseif i.spin == Up && l.spin == Dn
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = S₊(  core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        elseif i.spin == Dn && l.spin == Up
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = S₋(  core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        end
+      elseif site ==           j.site == k.site
+        if k.spin == j.spin
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = N(   core(tt_in,site), k.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        elseif k.spin == Up && j.spin == Dn
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = S₊(  core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        elseif k.spin == Dn && j.spin == Up
+          cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = S₋(  core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+        end
+      elseif site == i.site ==           k.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AdagupAdagdn( core(tt_in,site),  flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==           j.site ==           l.site
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = AupAdn(core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site == i.site                                # Creation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = Adag(  core(tt_in,site), i.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==           j.site                      # Annihilation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = A(     core(tt_in,site), j.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==                     k.site            # Creation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = Adag(  core(tt_in,site), k.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      elseif site ==                               l.site  # Annihilation operator
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = A(     core(tt_in,site), l.spin, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      else
+        cores[site], flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn = Id(    core(tt_in,site),         flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+      end
+    end
+    shift_ranks!(col_qn(core(tt_in,d)), ranks[d+1], rank(tt_in, d+1), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+
+    tt_out = lmul!(ε(i,j,k,l)*w, TTvector(ranks, cores))
+
+    # Sanity check for the ranks
+    check(tt_out)
+
+    return tt_out
+  end
 end
 
 # Convenience function
-@inline function shift_qn(qn::AbstractRange, flux::Int, nl::Int, nr::Int, N::Int)
-  start = min(max(nl,   first(qn)+(flux>0 ? flux : 0)), last(qn )+1)
-  stop  = max(min(N-nr, last(qn ) +(flux<0 ? flux : 0)),first(qn)-1)
-  return start:stop
+@inline function shift_qn(qns::Vector{Tuple{Int,Int}}, Nup::Int, Ndn::Int, 
+                          flux_up::Int, nl_up::Int, nr_up::Int, 
+                          flux_dn::Int, nl_dn::Int, nr_dn::Int)
+  return filter(
+      qn -> ( 
+        (nup,ndn) = qn; 
+        return nl_up ≤ nup-1 ≤ Nup-nr_up && nl_dn ≤ ndn-1 ≤ Ndn-nr_dn && (nup-flux_up, ndn-flux_dn) in qns
+      ), 
+      qns)
 end
 
-function shift_ranks!(ranks::AbstractVector{Int}, flux::Int, nl::Int, nr::Int, N::Int)
-  @boundscheck @assert length(ranks) ≥ flux 
-  @boundscheck @assert nl ≥ 0 && nr ≥ 0 && nl + nr ≤ N
+function shift_ranks!(qns::Vector{Tuple{Int,Int}}, ranks::Matrix{Int}, Nup::Int, Ndn::Int, 
+                          flux_up::Int, nl_up::Int, nr_up::Int, 
+                          flux_dn::Int, nl_dn::Int, nr_dn::Int)
+  @boundscheck @assert size(ranks,1) ≥ flux_up
+  @boundscheck @assert nl_up ≥ 0 && nr_up ≥ 0 && nl_up + nr_up ≤ Nup
+  @boundscheck @assert size(ranks,2) ≥ flux_dn
+  @boundscheck @assert nl_dn ≥ 0 && nr_dn ≥ 0 && nl_dn + nr_dn ≤ Ndn
 
-  start = min(max(nl,   firstindex(ranks)+(flux>0 ? flux : 0)), lastindex(ranks )+1)
-  stop  = max(min(N-nr, lastindex( ranks)+(flux<0 ? flux : 0)), firstindex(ranks)-1)
-  qn = start:stop
-
-  ranks[qn] = ranks[qn.-flux]
-  ranks[begin:start-1]  .= 0
-  ranks[stop+1:end] .= 0
-
-  return qn
+  shifted_qns = shift_qn(qns,Nup,Ndn,flux_up,nl_up,nr_up,flux_dn,nl_dn,nr_dn)
+  for (nup,ndn) in shifted_qns
+    ranks[nup,ndn] = ranks[nup-flux_up,ndn-flux_dn]
+  end
+  for (nup,ndn) in setdiff(qns, shifted_qns)
+    ranks[nup,ndn] = 0
+  end
+  return shifted_qns
 end
 
-function shift_ranks!(new_ranks::AbstractVector{Int}, ranks::AbstractVector{Int}, 
-                      flux::Int, nl::Int, nr::Int, N::Int)
-  @boundscheck @assert nl ≥ 0 && nr ≥ 0 && nl + nr ≤ N
+function shift_ranks!(qns::Vector{Tuple{Int,Int}}, new_ranks::AbstractMatrix{Int}, ranks::AbstractMatrix{Int}, Nup::Int, Ndn::Int, 
+                          flux_up::Int, nl_up::Int, nr_up::Int, 
+                          flux_dn::Int, nl_dn::Int, nr_dn::Int)
+  @boundscheck @assert size(ranks,1) ≥ flux_up
+  @boundscheck @assert nl_up ≥ 0 && nr_up ≥ 0 && nl_up + nr_up ≤ Nup
+  @boundscheck @assert size(ranks,2) ≥ flux_dn
+  @boundscheck @assert nl_dn ≥ 0 && nr_dn ≥ 0 && nl_dn + nr_dn ≤ Ndn
 
-  start = min(max(nl,   firstindex(ranks)+(flux>0 ? flux : 0)), lastindex(ranks )+1)
-  stop  = max(min(N-nr, lastindex( ranks)+(flux<0 ? flux : 0)), firstindex(ranks)-1)
-  qn = start:stop
+  new_ranks .= 0
+  shifted_qns = shift_qn(qns,Nup,Ndn,flux_up,nl_up,nr_up,flux_dn,nl_dn,nr_dn)
+  for (nup,ndn) in shifted_qns
+    new_ranks[nup,ndn] = ranks[nup-flux_up,ndn-flux_dn]
+  end
 
-  new_ranks[qn] = ranks[qn.-flux]
-  new_ranks[begin:start-1]  .= 0
-  new_ranks[stop+1:end] .= 0
-
-  return qn
+  return shifted_qns
 end
 
-function shift_ranks( ranks::AbstractVector{Int}, 
-                      flux::Int, nl::Int, nr::Int, N::Int)
+function shift_ranks(qns::Vector{Tuple{Int,Int}}, ranks::AbstractMatrix{Int}, Nup::Int, Ndn::Int, 
+                          flux_up::Int, nl_up::Int, nr_up::Int, 
+                          flux_dn::Int, nl_dn::Int, nr_dn::Int)
   new_ranks = deepcopy(ranks)
-  qn = shift_ranks!(new_ranks, ranks, flux, nl, nr, N)
-  return qn, new_ranks
+  shifted_qns = shift_ranks!(qns, new_ranks, ranks, Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
+  return shifted_qns, new_ranks
+end
+
+# Fermionic anticommutation dictates we fix an order for the operators, 
+# which implies changing sign according to the permutation parity.
+function ε(i::Orbital, j::Orbital)
+  return ( i.site<j.site || i == j || (i.site == j.site && i.spin==Dn && j.spin==Up) ? 1 : -1 )
+end
+
+function ε(i::Orbital, k::Orbital, l::Orbital, j::Orbital )
+  p = sortperm([i,j,k,l], lt=(i,j) -> (i.site<j.site || (i.site == j.site && i.spin==Up && j.spin==Dn)) )
+  return ε!(p)
+end
+
+function ε!(p::Vector{Int})
+  n = length(p)
+  if n==1
+    return 1
+  else
+    i = findfirst(isequal(n),p)
+    popat!(p,i)
+    return ( isodd(n-i) ? -1 : 1 ) * ε!(p)
+  end
 end

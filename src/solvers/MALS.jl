@@ -35,7 +35,7 @@ end
 function MALSForwardSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
   move_core!(x, 1; keepRank=true) # Right-orthogonalize the tensor x
   Fᴿ = RightToLeftFraming(H,x)
-  Fᴸ = IdFrame(Val(d), Val(N), 1)
+  Fᴸ = IdFrame(Val(d), Val(Nup), Val(Ndn), 1)
 
   λ = T(0)
   ep = ε/sqrt(d-1)
@@ -69,7 +69,7 @@ end
 function MALSBackSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,N,d}
   move_core!(x, d-1; keepRank=false) # Right-orthogonalize the tensor x
   Fᴸ = LeftToRightFraming(H,x)
-  Fᴿ = IdFrame(Val(d), Val(N), d+1)
+  Fᴿ = IdFrame(Val(d), Val(Nup), Val(Ndn), d+1)
   Fᴿ = FramingStepLeft(H,x,Fᴿ)
 
   λ = T(0)

@@ -3,11 +3,13 @@
   T = Float64
   d = 10
   N = 6
+  Sz = 0//2
 
-  s = [2,4,6,7,8,10]
-  x = tt_state([k∈s for k=1:d])
+  s1 = [2,4,6]
+  s2 = [7,8,10]
+  x = tt_state([k∈s1 for k=1:d], [k∈s2 for k=1:d])
   X = Array(x)
-  I0 = CartesianIndex(Tuple( (i in s ? 2 : 1) for i=1:d ))
+  I0 = CartesianIndex(Tuple( (i in s1 && i in s2 ? 4 : i in s2 ? 3 : i in s1 ? 2 : 1) for i=1:d ))
 
   pass=true
   for I in CartesianIndices(X)
@@ -26,8 +28,9 @@ end
   T = Float64
   d = 10
   N = 4
+  Sz = -2//2
 
-  x = tt_zeros(d,N)
+  x = tt_zeros(d,N,Sz)
   X = Array(x)
   
   pass=true
@@ -46,14 +49,16 @@ end
   T = Float64
   d = 10
   N = 5
+  Sz = 1//2
 
-  x = tt_ones(d,N)
+  x = tt_ones(d,N,Sz)
   X = Array(x)
   
   pass=true
   for I in CartesianIndices(X)
-    n = sum(Tuple(I).==2)
-    if !( n==N && X[I]==T(1) || (X[I]==T(0)) )
+    n = sum(Tuple(I).==2)+sum(Tuple(I).==3)+2*sum(Tuple(I).==4)
+    sz = (sum(Tuple(I).==2)-sum(Tuple(I).==3))//2
+    if !( X[I] == (n==N && sz==Sz ? T(1) : T(0) ) )
       pass=false
       break
     end
@@ -68,15 +73,33 @@ end
   T = Float64
   d = 10
   N = 6
+  Sz= 2//2
 
-  r = [ [ (k in (1,d+1) ? 1 : rand(0:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,1:5)
   X = Array(x)
   
   pass=true
   for I in CartesianIndices(X)
-    n = sum(Tuple(I).==2)
-    if !( n==N && X[I]!=T(0) || (X[I]==T(0)) )
+    n = sum(Tuple(I).==2)+sum(Tuple(I).==3)+2*sum(Tuple(I).==4)
+    sz = (sum(Tuple(I).==2)-sum(Tuple(I).==3))//2
+    if !(  (n==N && sz==Sz ? X[I] != T(0) : X[I]==T(0) ) )
+      @show I, n, sz, N, Sz
+      @show X[I]
+      lup, ldn = 1, 1
+      for k=1:d
+        if I[k] == 1
+          rup,rdn = lup, ldn
+        elseif I[k] == 2
+          rup,rdn = lup+1, ldn
+        elseif I[k] == 3
+          rup,rdn = lup, ldn+1
+        elseif I[k] == 4
+          rup,rdn = lup+1, ldn+1
+        end
+        @show k, I[k], core(x,k)[(lup,ldn),(rup,rdn)]
+        lup,ldn = rup,rdn
+      end
+
       pass=false
       break
     end
@@ -89,15 +112,17 @@ end
 @test begin
   T = Float64
   d = 5
-  N = 3
+  N = 4
+  Sz = 0//2
 
-  s = [1,2,4]
-  x = tt_state([k∈s for k=1:d])
+  sup = [1,2]
+  sdn = [2,4]
+  x = tt_state([k∈sup for k=1:d],[k∈sdn for k=1:d])
 
   new_d = 10
   old_dims = (2,3,4,6,10)
   y = QNTensorTrains.add_non_essential_dims(x, new_d, old_dims)
-  yn = tt_state([k∈old_dims[s] for k=1:new_d])
+  yn = tt_state([k∈old_dims[sup] for k=1:new_d],[k∈old_dims[sdn] for k=1:new_d])
 
   norm(Array(y) - Array(yn)) < eps()
 end
@@ -107,12 +132,10 @@ end
   T = Float64
   d = 10
   N = 6
-
-  r1 = [ [ (k in (1,d+1) ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  r2 = [ [ (k in (1,d+1) ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  Sz = 2//2
   
-  x1 = tt_randn(Val(d),Val(N),r1)
-  x2 = tt_randn(Val(d),Val(N),r2)
+  x1 = randomized_state(d,N,Sz,1:5)
+  x2 = randomized_state(d,N,Sz,1:5)
   X1 = Array(x1)
   X2 = Array(x2)
   α = randn()
@@ -126,12 +149,10 @@ end
   T = Float64
   d = 10
   N = 6
-
-  r1 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  r2 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  Sz = -2//2
   
-  x1 = tt_randn(Val(d),Val(N),r1)
-  x2 = tt_randn(Val(d),Val(N),r2)
+  x1 = randomized_state(d,N,Sz,1:5)
+  x2 = randomized_state(d,N,Sz,1:5)
   X1 = Array(x1)
   X2 = Array(x2)
   α = randn()
@@ -145,10 +166,9 @@ end
   T = Float64
   d = 10
   N = 6
+  Sz = 4//2
 
-  r = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  
-  x = tt_randn(Val(d),Val(N),r)
+  x = randomized_state(d,N,Sz,1:5)
   c = pi
   X = Array(x)
 
@@ -160,13 +180,11 @@ end
 @test begin
   T = Float64
   d = 10
-  N = 6
-
-  r1 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  r2 = [ [ (k==1 || k==d+1 ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  N = 7
+  Sz = -1//2
   
-  x1 = tt_randn(Val(d),Val(N),r1)
-  x2 = tt_randn(Val(d),Val(N),r2)
+  x1 = randomized_state(d,N,Sz,1:5)
+  x2 = randomized_state(d,N,Sz,1:5)
   X1 = Array(x1)
   X2 = Array(x2)
 

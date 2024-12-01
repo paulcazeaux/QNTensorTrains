@@ -1,14 +1,15 @@
 using LinearAlgebra
 
-function Base.:+(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.:+(b::TTvector{T,Nup,Ndn,d}, c::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   @boundscheck begin
-    @assert rank(b,1,0) == rank(c,1,0)
-    @assert rank(b,d+1,N) == rank(c,d+1,N)
+    @assert rank(b,1,1) == rank(c,1,1)
+    @assert rank(b,d+1,1) == rank(c,d+1,1)
   end
 
-  r = rank(b).+rank(c)
-  r[1] .= rank(b,1)
-  r[d+1] .= rank(b,d+1)
+  r = deepcopy(rank(b))
+  for k=2:d
+    r[k] .+= rank(c,k)
+  end
 
   cores = [core(b,k)⊕core(c,k) for k=1:d]
   a = TTvector(r, cores)
@@ -16,10 +17,11 @@ function Base.:+(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
   return a
 end
 
-function Base.:+(b::TTvector{T,N,d}, c::Number) where {T<:Number,N,d}
-  r = rank(b).+1
-  r[1][0] = rank(b,1,0)
-  r[d+1][N] = rank(b,d+1,N)
+function Base.:+(b::TTvector{T,Nup,Ndn,d}, c::Number) where {T<:Number,Nup,Ndn,d}
+  r = deepcopy(rank(b))
+  for k=2:d, (nup,ndn) in row_qn(core(b,k))
+    r[nup,ndn] += 1
+  end
 
   cores = [core(b,k)⊕c for k=1:d]
   a = TTvector(r, cores)
@@ -37,15 +39,16 @@ function Base.:-(a::TTvector)
   return (-1)*a
 end
 
-function Base.:-(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.:-(b::TTvector{T,Nup,Ndn,d}, c::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   @boundscheck begin
-    @assert rank(b,1,0) == rank(c,1,0)
-    @assert rank(b,d+1,N) == rank(c,d+1,N)
+    @assert rank(b,1) == rank(c,1)
+    @assert rank(b,d+1) == rank(c,d+1)
   end
   
-  r = [rank(b,k) .+ rank(c,k) for k=1:d+1]
-  r[1][0] = rank(b,1,0)
-  r[d+1][N] = rank(b,d+1,N)
+  r = deepcopy(rank(b))
+  for k=2:d
+    r[k] .+= rank(c,k)
+  end
 
   cores = [core(b,k)⊕( k>1 ? core(c,k) : -core(c,1)) for k=1:d]
   a = TTvector(r, cores)
@@ -53,14 +56,15 @@ function Base.:-(b::TTvector{T,N,d}, c::TTvector{T,N,d}) where {T<:Number,N,d}
   return a
 end
 
-function Base.:-(b::TTvector{T,N,d}, c::Number) where {T<:Number,N,d}
+function Base.:-(b::TTvector{T,Nup,Ndn,d}, c::Number) where {T<:Number,Nup,Ndn,d}
   return b+(-c)
 end
 
-function Base.:-(b::Number, c::TTvector{T,N,d}) where {T<:Number,N,d}
-  r = [rank(b,k).+1 for k=1:d+1]
-  r[  1][0] = rank(b,  1,0)
-  r[d+1][N] = rank(b,d+1,N)
+function Base.:-(b::Number, c::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
+  r = deepcopy(rank(b))
+  for k=2:d, (nup,ndn) in row_qn(core(b,k))
+    r[nup,ndn] += 1
+  end
 
   cores = [b⊕(k > 1 ? core(c,k) : -core(c,1)) for k=1:d]
   a = TTvector(r, cores)
@@ -69,21 +73,21 @@ function Base.:-(b::Number, c::TTvector{T,N,d}) where {T<:Number,N,d}
 end
 
 """
-    sum(tt::TTvector{T,N,d})
+    sum(tt::TTvector{T,Nup,Ndn,d})
 
 Sum all elements in `tt`.
 """
-function Base.sum(tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.sum(tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   e = tt_ones(size(tt),T)
   return dot(e,tt)
 end
 
 """
-  roundSum(α::Vector{Number}, summands::Vector{TTvector{T,N,d}}, tol::Float64)
+  roundSum(α::Vector{Number}, summands::Vector{TTvector{T,Nup,Ndn,d}}, tol::Float64)
 
 Computes the sum of vectors `summands` with coefficients `α`, rounding the result with precision `ϵ`.
 """
-function roundSum(α::Vector{T1}, summands::Vector{TTvector{T,N,d,S}}, tol::Float64) where {T1<:Number,T<:Number,N,d,S<:AbstractMatrix{T}}
+function roundSum(α::Vector{T1}, summands::Vector{TTvector{T,Nup,Ndn,d,S}}, tol::Float64) where {T1<:Number,T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
   if length(summands) == 1
     return round!(α[1] * summands[1], tol)
   elseif length(summands) == 2

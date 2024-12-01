@@ -1,58 +1,57 @@
-using OffsetArrays
-
 """
-    TTvector{T <:Number,N,d}
+    TTvector{T <:Number,Nup,Ndn,d}
 
 Implementation of Block Sparse TTvector class and associated core functions.
 Mode sizes are assumed to be all 2 and total quantum number is N.
 """
-mutable struct TTvector{T<:Number,N,d,S<:AbstractMatrix{T}} # <: AbstractArray{T,d}
-  r::Vector{OffsetVector{Int,Vector{Int}}}
-  cores::Vector{SparseCore{T,N,d,S}}
+mutable struct TTvector{T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}} # <: AbstractArray{T,d}
+  r::Vector{Matrix{Int}}
+  cores::Vector{SparseCore{T,Nup,Ndn,d,S}}
   orthogonal::Bool
   corePosition::Int
 
-  function TTvector(r::Vector{OffsetVector{Int,Vector{Int}}}, 
-                    cores::Vector{SparseCore{T,N,d,S}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+  function TTvector(r::Vector{Matrix{Int}}, 
+                    cores::Vector{SparseCore{T,Nup,Ndn,d,S}}) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
     @boundscheck begin
+      @assert length(r) == d+1
       length(cores) == d || throw(DimensionMismatch("Trying to form $d-dimensional tensor train with only $(length(cores)) cores"))
-      N ≤ d || throw(DimensionMismatch("Total number of electrons $N cannot be larger than dimension $d"))
+      0≤Nup≤d && 0≤Ndn≤d || throw(DimensionMismatch("Total number of spin-up electrons $Nup, and spin-down $Ndn cannot be larger than dimension $d"))
     end
     
     for k=1:d
       @assert cores[k].k == k
-      @assert cores[k].row_ranks == r[k]
-      @assert cores[k].col_ranks == r[k+1]
+      @assert row_ranks(cores[k]) == r[k]
+      @assert col_ranks(cores[k]) == r[k+1]
     end
-    return new{T,N,d,S}(r,cores,false,0)
+    return new{T,Nup,Ndn,d,S}(r,cores,false,0)
   end
 end
 
-function check(tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function check(tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   # Check rank consistency
   for k=1:d
-    for m in core(tt,k).row_qn
-      if core(tt,k).row_ranks[m] !== tt.r[k][m]
-        @warn "Row ranks at $(m) for $(k)-th block are inconsistent between core and tensor train: $(core(tt,k).row_ranks[m]) instead of $(tt.r[k][m])"
+    for (nup,ndn) in row_qn(core(tt,k))
+      if row_rank(core(tt,k),nup,ndn) !== tt.r[k][nup,ndn]
+        @warn "Row ranks at $((nup,ndn)) for $(k)-th block are inconsistent between core and tensor train: $(core(tt,k).row_ranks[nup,ndn]) instead of $(tt.r[k][nup,ndn])"
       end
     end
-    for n in core(tt,k).col_qn
-      if core(tt,k).col_ranks[n] !== tt.r[k+1][n]
-        @warn "Column ranks at $(n) for $(k)-th block are inconsistent between core and tensor train: $(core(tt,k).col_ranks[n]) instead of $(tt.r[k+1][n])"
+    for (nup,ndn) in col_qn(core(tt,k))
+      if col_rank(core(tt,k),nup,ndn) !== tt.r[k+1][nup,ndn]
+        @warn "Column ranks at $((nup,ndn)) for $(k)-th block are inconsistent between core and tensor train: $(core(tt,k).col_ranks[nup,ndn]) instead of $(tt.r[k+1][nup,ndn])"
       end
     end
 
-    for l in core(tt,k).row_qn, r in core(tt,k).col_qn ∩ (l:l+1)
-      if size(core(tt,k)[l,r]) !== (core(tt,k).row_ranks[l], core(tt,k).col_ranks[r])
-        @warn "Wrong $(k)-th core ($l,$r) block size: $(size(core(tt,k)[l,r])) instead of $((core(tt,k).row_ranks[l], core(tt,k).col_ranks[r]))"
+    for (lup,ldn) in row_qn(core(tt,k)), (rup,rdn) in [r for r in ((lup,ldn), (lup+1,ldn), (lup,ldn+1), (lup+1,ldn+1)) if r in col_qn(core(tt,k))]
+      if size(core(tt,k)[(lup,ldn),(rup,rdn)]) !== (row_rank(core(tt,k),lup,ldn), col_rank(core(tt,k),rup,rdn))
+        @warn "Wrong $(k)-th core ($((lup,ldn)),$((rup,rdn))) block size: $(size(core(tt,k)[(lup,ldn),(rup,rdn)])) instead of ($(row_rank(core(tt,k),lup,ldn)), $(col_rank(core(tt,k),rup,rdn)))"
       end
     end
   end
 end
 
-function Base.show(io::IO, ::MIME"text/plain", tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.show(io::IO, ::MIME"text/plain", tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   if get(io, :compact, true)
-    str = "TTvector{$T,$N,$d}. Maximum rank $(maximum(sum.(tt.r)))"
+    str = "TTvector{$T,$Nup,$Ndn,$d}. Maximum rank $(maximum(sum.(tt.r)))"
   else
     # Manage some formatting and padding
     strr = ["r[i]=$(sum(r))" for r in tt.r]
@@ -60,13 +59,13 @@ function Base.show(io::IO, ::MIME"text/plain", tt::TTvector{T,N,d}) where {T<:Nu
     padr = len .- length.(strr)
     strr = ["$(s)"*" "^(pad+len+3)          for (s,pad) in zip(strr, padr)]
 
-    str = string("TTvector{$T,$N,$d}. Ranks are:\n", strr...)
+    str = string("TTvector{$T,$Nup,$Ndn,$d}. Ranks are:\n", strr...)
   end
     print(io, str)
 end
 
-function Base.show(io::IO, tt::TTvector{T,N,d}) where {T<:Number,N,d}
-    str = "TTvector{$T,$N,$d}. Maximum rank $(maximum(sum.(tt.r)))"
+function Base.show(io::IO, tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
+    str = "TTvector{$T,$Nup,$Ndn,$d}. Maximum rank $(maximum(sum.(tt.r)))"
     println(io, str)
     for k=1:d
       println(io)
@@ -74,11 +73,11 @@ function Base.show(io::IO, tt::TTvector{T,N,d}) where {T<:Number,N,d}
     end
 end
 
-function Base.summary(io::IO, tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.summary(io::IO, tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   show(summary(tt))
 end
 
-function Base.summary(tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.summary(tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   if d>0
     return string("$(d)-dimensional TTvector object with eltype $T, ranks $(tt.r)")
   else
@@ -87,15 +86,28 @@ function Base.summary(tt::TTvector{T,N,d}) where {T<:Number,N,d}
 end
 
 """
-    tt = tt_zeros(d::Int, N::Int, [T=Float64])
+    tt = tt_zeros(d::Int, N::Int, Sz::Rational, [T=Float64])
 
 Compute the d-dimensional sTT-tensor of all zeros.
 """
-function tt_zeros(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
-  r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
-  r[1][0] = 1
-  r[d+1][N] = 1
-  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
+function tt_zeros(d::Int, N::Int, Sz::Rational, ::Type{T}=Float64) where T<:Number
+  Nup = Int(N+2Sz)÷2
+  Ndn = Int(N-2Sz)÷2
+  r = [zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  r[  1][state_qn(Nup,Ndn,d,  1)[1]...] = 1
+  r[d+1][state_qn(Nup,Ndn,d,d+1)[1]...] = 1
+  cores = [SparseCore{T,Nup,Ndn,d}(k, r[k], r[k+1]) for k=1:d]
+
+  tt = TTvector(r, cores)
+  check(tt)
+
+  return tt
+end
+function tt_zeros(::Val{d}, ::Val{Nup}, ::Val{Ndn}, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
+  r = [zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  r[  1][state_qn(Nup,Ndn,d,  1)[1]...] = 1
+  r[d+1][state_qn(Nup,Ndn,d,d+1)[1]...] = 1
+  cores = [SparseCore{T,Nup,Ndn,d}(k, r[k], r[k+1]) for k=1:d]
 
   tt = TTvector(r, cores)
   check(tt)
@@ -103,32 +115,22 @@ function tt_zeros(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
   return tt
 end
 
-function tt_zeros(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
-  r = [[0 for n in occupation_qn(N,d,k)] for k=1:d+1]
-  r[1][0] = 1
-  r[d+1][N] = 1
-  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
-
-  tt = TTvector(r, cores)
-  check(tt)
-
-  return tt
-end
-
-function tt_zeros(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, ::Type{T}=Float64) where {T<:Number,N,d}
+function tt_zeros(::Val{d}, ::Val{Nup}, ::Val{Ndn}, r::Vector{Matrix{Int}}, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
   @boundscheck (length(r) == d+1) || (length(r) == d-1)
 
   if length(r) == d+1
-    for k=1:d
-      @boundscheck axes(r[k],1) == occupation_qn(N,d,k)
+    for k=1:d+1
+      @boundscheck size(r[k]) == (Nup+1,Ndn+1) && findall(>(0), r[k]) ⊆ state_qn(Nup,Ndn,d,k)
     end
-    cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
+    cores = [SparseCore{T,Nup,Ndn,d}(k, r[k], r[k+1]) for k=1:d]
 
   else # length(r) == d-1
     for k=1:d-1
-      @boundscheck axes(r[k],1) == occupation_qn(N,d,k-1)
+      @boundscheck size(r[k]) == (Nup+1,Ndn+1) && findall(>(0), r[k]) ⊆ state_qn(Nup,Ndn,d,k+1)
     end
-    cores = [SparseCore{T,N,d}(k, k>1 ? r[k-1] : 1, k<d ? r[k] : 1) for k=1:d]
+    r₀ = zeros(Int,Nup+1,Ndn+1); r₀[state_qn(Nup,Ndn,d,  1)[1]...] = 1
+    rₑ = zeros(Int,Nup+1,Ndn+1); rₑ[state_qn(Nup,Ndn,d,d+1)[1]...] = 1
+    cores = [SparseCore{T,Nup,Ndn,d}(k, k>1 ? r[k-1] : r₀, k<d ? r[k] : rₑ) for k=1:d]
   end
   tt = TTvector(r, cores)
   check(tt)
@@ -137,17 +139,24 @@ function tt_zeros(::Val{d}, ::Val{N}, r::Vector{OffsetVector{Int,Vector{Int}}}, 
 end
 
 """
-    tt = tt_ones(d::Int, N::Int, [T=Float64])
+    tt = tt_ones(d::Int, N::Int, Sz::Rational, [T=Float64])
 
 Compute the d-dimensional sTT-tensor of all zeros.
 """
-function tt_ones(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
-  r = [[1 for n in occupation_qn(N,d,k)] for k=1:d+1]
-  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
+function tt_ones(d::Int, N::Int, Sz::Rational, ::Type{T}=Float64) where T<:Number
+  Nup = Int(N+2Sz)÷2
+  Ndn = Int(N-2Sz)÷2
+  r = [zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  for k=1:d+1, (nup,ndn) in state_qn(Nup,Ndn,d,k)
+    r[k][nup,ndn] = 1
+  end
+  cores = [SparseCore{T,Nup,Ndn,d}(k, r[k], r[k+1]) for k=1:d]
 
-  for k=1:d
-    fill!.(cores[k].unoccupied, 1)
-    fill!.(cores[k].occupied, 1)
+  for k=1:d, (nup,ndn) in row_qn(cores[k])
+    (nup  ,ndn  ) in col_qn(cores[k]) && fill!(○○(cores[k],nup,ndn), 1)
+    (nup+1,ndn  ) in col_qn(cores[k]) && fill!(up(cores[k],nup,ndn), 1)
+    (nup  ,ndn+1) in col_qn(cores[k]) && fill!(dn(cores[k],nup,ndn), 1)
+    (nup+1,ndn+1) in col_qn(cores[k]) && fill!(●●(cores[k],nup,ndn), 1)
   end
 
   tt = TTvector(r, cores)
@@ -156,13 +165,18 @@ function tt_ones(d::Int, N::Int, ::Type{T}=Float64) where T<:Number
   return tt
 end
 
-function tt_ones(::Val{d}, ::Val{N}, ::Type{T}=Float64) where {T<:Number,N,d}
-  r = [[1 for n in occupation_qn(N,d,k)] for k=1:d+1]
-  cores = [SparseCore{T,N,d}(k, r[k], r[k+1]) for k=1:d]
+function tt_ones(::Val{d}, ::Val{Nup}, ::Val{Ndn}, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
+  r = [zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  for k=1:d+1, (nup,ndn) in state_qn(Nup,Ndn,d,k)
+    r[k][nup,ndn] = 1
+  end
+  cores = [SparseCore{T,Nup,Ndn,d}(k, r[k], r[k+1]) for k=1:d]
 
-  for k=1:d
-    fill!.(cores[k].unoccupied, 1)
-    fill!.(cores[k].occupied, 1)
+  for k=1:d, (nup,ndn) in row_qn(cores[k])
+    (nup  ,ndn  ) in col_qn(cores[k]) && fill!(○○(cores[k],nup,ndn), 1)
+    (nup+1,ndn  ) in col_qn(cores[k]) && fill!(up(cores[k],nup,ndn), 1)
+    (nup  ,ndn+1) in col_qn(cores[k]) && fill!(dn(cores[k],nup,ndn), 1)
+    (nup+1,ndn+1) in col_qn(cores[k]) && fill!(●●(cores[k],nup,ndn), 1)
   end
 
   tt = TTvector(r, cores)
@@ -173,24 +187,25 @@ end
 
 
 
-function tt_state(state::NTuple{N, Int}, ::Val{d}, ::Type{T}=Float64)::TTvector{T,N,d} where {T<:Number,N,d}
-  @assert all(1 .≤ state .≤ d)
-  @assert allunique(state)
-
-  return tt_state([k∈state for k=1:d], T)
+function tt_state(state_up::NTuple{Nup, Int}, state_dn::NTuple{Ndn, Int}, ::Val{d}, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
+  @assert all(1 .≤ state_up .≤ d) && all(1 .≤ state_dn .≤ d)
+  @assert allunique(state_up) && allunique(state_dn)
+  return tt_state([k∈state_up for k=1:d], [k∈state_dn for k=1:d], T)
 end
 
-function tt_state(state::Vector{Bool}, ::Type{T}=Float64) where T<:Number
-  d = length(state)
-  N = sum(state)
+function tt_state(state_up::Vector{Bool}, state_dn::Vector{Bool}, ::Type{T}=Float64) where T<:Number
+  d = length(state_up)
+  @boundscheck @assert length(state_dn) == d
+  Nup = sum(state_up)
+  Ndn = sum(state_dn)
 
-  Nl = [0;cumsum(state)]
-  cores = [SparseCore{T,N,d}(state[k], Nl[k], k) for k=1:d]
-  r = [deepcopy(cores[k].row_ranks) for k=1:d]
-  r = [r;[deepcopy(cores[d].col_ranks)]]
+  nup = [0;cumsum(state_up)]
+  ndn = [0;cumsum(state_dn)]
+  cores = [SparseCore{T,Nup,Ndn,d}(state_up[k], nup[k], state_dn[k], ndn[k], k) for k=1:d]
+  r = [[deepcopy(cores[k].row_ranks) for k=1:d];[deepcopy(cores[d].col_ranks)]]
 
   for k=1:d-1
-    @assert r[k+1] == cores[k].col_ranks
+    @assert r[k+1] == col_ranks(cores[k])
   end
 
   tt = TTvector(r, cores)
@@ -200,92 +215,77 @@ function tt_state(state::Vector{Bool}, ::Type{T}=Float64) where T<:Number
 end
 
 """
-    add_non_essential_dims(tt::TTvector{T,N,d}, new_n::NTuple{newd,Int}, old_vars_pos::NTuple{d,Int})
+    add_non_essential_dims(tt::TTvector{T,Nup,Ndn,d}, new_n::NTuple{newd,Int}, old_vars_pos::NTuple{d,Int})
 
 Create `enlarged_tt` object with new 'dummy' modes. Mode sizes of `enlarged_tt` are equal to `new_n`, and the old modal indices positions should be given in the sorted list `old_vars_pos`.
 """
-function add_non_essential_dims(tt::TTvector{T,N,d,Matrix{T}}, newd::Int, old_vars_pos::NTuple{d,Int}) where {T<:Number,N,d}
+function add_non_essential_dims(tt::TTvector{T,Nup,Ndn,d,Matrix{T}}, newd::Int, old_vars_pos::NTuple{d,Int}) where {T<:Number,Nup,Ndn,d}
   @assert issorted(old_vars_pos)
   @assert length(old_vars_pos) == d
   @assert newd ≥ d
 
-  r = [[0 for n in occupation_qn(N,newd,k)] for k=1:newd+1]
-  cores = Vector{SparseCore{T,N,newd,Matrix{T}}}(undef, newd)
+  r = [zeros(Int,Nup+1,Ndn+1) for k=1:newd+1]
+  cores = Vector{SparseCore{T,Nup,Ndn,newd,Matrix{T}}}(undef, newd)
 
   # New dimensions corresponding to real ones
   for (k, kk) = enumerate(old_vars_pos)
     Ck = core(tt, k)
-    rqn = axes(Ck,1)
-    cqn = axes(Ck,3)
 
     # Compute new tensor ranks
-    r[kk  ][rqn] .= tt.r[k]
-    r[kk+1][cqn] .= tt.r[k+1]
+    r[kk  ] .= rank(tt,k)
+    r[kk+1] .= rank(tt,k+1)
 
     # Reconcile tensor ranks with cores
-    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
+    cores[kk] = SparseCore{T,Nup,Ndn,newd}(kk, r[kk], r[kk+1])
 
-    for l in axes(cores[kk],1) ∩ rqn, r ∈ (l:l+1) ∩ axes(cores[kk],3) ∩ cqn
-      cores[kk][l,r] = core(tt,k)[l,r]
+    for (lup,ldn) in row_qn(core(tt,k)), (rup,rdn) in ((lup,ldn),(lup+1,ldn),(lup,ldn+1),(lup+1,ldn+1))∩col_qn(core(tt,k))
+      if in_col_qn(rup,rdn,core(tt,k))
+        cores[kk][(lup,ldn),(rup,rdn)] = core(tt,k)[(lup,ldn),(rup,rdn)]
+      end
     end
   end
 
   # New dimensions before the first real dimension
-  C1 = core(tt,1)
-  qn = axes(C1,1)
-
   for kk in 1:old_vars_pos[1]-1
     # Compute new tensor ranks
-    r[kk  ][qn] .= C1.row_ranks
-    r[kk+1][qn] .= C1.row_ranks
+    r[kk  ] .= rank(tt,1)
+    r[kk+1] .= rank(tt,1)
 
     # Reconcile tensor ranks with cores
-    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
-
-    # Add appropriate cores
-    for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
-      cores[kk][l,l] = Array{T}(I(r[kk][l]))
-    end
+    l = (1,1)
+    cores[kk] = SparseCore{T,Nup,Ndn,newd}(kk, rank(tt,1), rank(tt,1))
+    copyto!(cores[kk][l,l], I(rank(tt,1,l)))
   end
 
   # New dimensions between real ones
   for k=2:d
-    Ck = core(tt, k)
-    qn = axes(Ck,1)
-
     for kk=old_vars_pos[k-1]+1:old_vars_pos[k]-1
-
       # Compute new tensor ranks
-      r[kk  ][qn] .= Ck.row_ranks
-      r[kk+1][qn] .= Ck.row_ranks
+      r[kk  ] .= rank(tt,k)
+      r[kk+1] .= rank(tt,k)
 
       # Reconcile tensor ranks with cores
-      cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
+      cores[kk] = SparseCore{T,Nup,Ndn,newd}(kk, rank(tt,k), rank(tt,k))
 
       # Add appropriate cores
-      for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
-        cores[kk][l,l] = Array{T}(I(r[kk][l]))
+      for l in row_qn(core(tt,k))
+        copyto!(cores[kk][l,l], I(rank(tt,k,l)))
       end
     end
   end
 
   # New dimensions after the last real dimension
-  Cd = core(tt,d)
-  qn = axes(Cd,3)
-
   for kk in old_vars_pos[d]+1:newd
-
     # Compute new tensor ranks
-    r[kk  ][qn] .= deepcopy(Ck.col_ranks)
-    r[kk+1][qn] .= deepcopy(Ck.col_ranks)
+    r[kk  ] .= rank(tt,d+1)
+    r[kk+1] .= rank(tt,d+1)
 
     # Reconcile tensor ranks with cores
-    cores[kk] = SparseCore{T,N,newd}(kk, r[kk], r[kk+1])
+    cores[kk] = SparseCore{T,Nup,Ndn,newd}(kk, rank(tt,d+1), rank(tt,d+1))
 
     # Add appropriate cores
-    for l in axes(cores[kk],1) ∩ qn ∩ axes(cores[kk],3)
-      cores[kk][l,l] = Array{T}(I(rank(enlarged_tt,kk,l)))
-    end
+    l = (1+Nup,1+Ndn)
+    copyto!(cores[kk][l,l], I(rank(tt,d+1,l)))
   end
   enlarged_tt = TTvector(r, cores)
   check(enlarged_tt)
@@ -300,7 +300,7 @@ end
 Create a TT-tensor view on a list of 3D SparseCores.
 The TT-tensor shares the same underlying data structure with `cores` immediately after the call.
 """
-function cores2tensor(cores::Vector{SparseCore{T,N,d,S}}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+function cores2tensor(cores::Vector{SparseCore{T,Nup,Ndn,d,S}}) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
   @assert d == length(cores)
   for k=1:d
     @assert cores[k].k == k
@@ -309,17 +309,17 @@ function cores2tensor(cores::Vector{SparseCore{T,N,d,S}}) where {T<:Number,N,d,S
   r = [[deepcopy(cores[k].row_ranks) for k=1:d]..., deepcopy(cores[d].col_ranks)]
 
   for k=2:d
-    @assert cores[d-1].col_ranks == cores[d].row_ranks
+    @assert cores[k-1].col_ranks == cores[k].row_ranks
   end
 
-  tt = TTvector(r, cores)
+  tt = TTvector(r, copy(cores))
   check(tt)
 
   return tt
 end
 
 """
-    tensor2cores(tt::TTvector{T,N,d})
+    tensor2cores(tt::TTvector{T,Nup,Ndn,d})
 
 Create a view on the list of SparseCores from `tt`.
 """
@@ -332,12 +332,12 @@ function core(tt::TTvector, k::Int)
   return tt.cores[k]
 end
 
-function set_core!(tt::TTvector{T,N,d}, new_core::SparseCore{T,N,d}) where {T<:Number,N,d}
+function set_core!!(tt::TTvector{T,Nup,Ndn,d}, new_core::SparseCore{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   tt.cores[new_core.k] = new_core
   return tt
 end
 
-function set_cores!(tt::TTvector{T,N,d,S}, first_core::SparseCore{T,N,d,S}, second_core::SparseCore{T,N,d,S}) where {T<:Number,N,d,S<:AbstractMatrix{T}}
+function set_cores!(tt::TTvector{T,Nup,Ndn,d,S}, first_core::SparseCore{T,Nup,Ndn,d,S}, second_core::SparseCore{T,Nup,Ndn,d,S}) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
   @boundscheck begin
     @assert second_core.k == first_core.k+1
     @assert first_core.col_ranks == second_core.row_ranks
@@ -350,107 +350,135 @@ function set_cores!(tt::TTvector{T,N,d,S}, first_core::SparseCore{T,N,d,S}, seco
 end
 
 """
-    ndims(tt::TTvector{T,N,d})
+    ndims(tt::TTvector{T,Nup,Ndn,d})
 
 Compute the number of dimensions of `tt`.
 """
-function Base.ndims(::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.ndims(::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   return d
 end
 
 """
-    size(tt::TTvector{T,N,d}, [dim])
+    size(tt::TTvector{T,Nup,Ndn,d}, [dim])
 
 Return a tuple containing the dimensions of `tt`. Optionally you can specify a dimension `dim` to just get the length of that dimension.
 """
-function Base.size(::TTvector{T,N,d}) where {T<:Number,N,d}
+function Base.size(::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   return ntuple(k->2, d)
 end
 
-function Base.size(::TTvector{T,N,d}, dim::Int) where {T<:Number,N,d}
-  return 2
+function Base.size(::TTvector{T,Nup,Ndn,d}, dim::Int) where {T<:Number,Nup,Ndn,d}
+  return 4
 end
 
 """
-    Base.length(tt::TTvector{T,N,d})
+    Base.length(tt::TTvector{T,Nup,Ndn,d})
 
 Compute the number of elements in `tt`, viewed as a `d`-dimensional Array.
 """
-function Base.length(::TTvector{T,N,d}) where {T<:Number,N,d}
-  return 2^d
+function Base.length(::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
+  return 4^d
 end
 
 
 """
-    rank(tt::TTvector{T,N,d}, [ind::Int], [n::Int])
+    rank(tt::TTvector{T,Nup,Ndn,d}, [ind::Int], [n::Int])
 
 Return a tuple containing the TT-ranks of `tt`. Optionally you can specify an index `ind` to just get the rank of that edge, and additionally the block index `n`.
 """
-function LinearAlgebra.rank(tt::TTvector{T,N,d}) where {T<:Number,N,d}
+function LinearAlgebra.rank(tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   return tt.r
 end
 
-function LinearAlgebra.rank(tt::TTvector{T,N,d}, k::Int) where {T<:Number,N,d}
+function LinearAlgebra.rank(tt::TTvector{T,Nup,Ndn,d}, k::Int) where {T<:Number,Nup,Ndn,d}
   @boundscheck 1 ≤ k ≤ d+1 || throw(BoundsError(tt, k))
   return tt.r[k]
 end
 
-function LinearAlgebra.rank(tt::TTvector{T,N,d}, k::Int, n::Int) where {T<:Number,N,d}
+function LinearAlgebra.rank(tt::TTvector{T,Nup,Ndn,d}, k::Int, n::Int) where {T<:Number,Nup,Ndn,d}
   @boundscheck begin
-    1 ≤ k ≤ d+1 || throw(BoundsError(tt, k))
-    n ∈ axes(tt.r[k],1) || throw(BoundsError(tt.r[k], n))
+    1 ≤ k ≤ d+1                     || throw(BoundsError(tt, k))
     if k ≤ d
-      tt.r[k][n] == core(tt,k).row_ranks[n] || throw(DimensionMismatch("Tensor ranks $(tt.r[k]) do not match $k-th core row ranks $(core(tt,k).row_ranks)"))
-    end
-    if k ≥ 2
-      tt.r[k][n] == core(tt,k-1).col_ranks[n] || throw(DimensionMismatch("Tensor ranks $(tt.r[k]) do not match $(k-1)-th core column ranks $(core(tt,k-1).col_ranks)"))
+      n in axes(row_qn(core(tt,k)),1) || throw(BoundsError(row_qn(core(tt,k)), n))
+    else
+      n in axes(col_qn(core(tt,d)),1) || throw(BoundsError(col_qn(core(tt,d)), n))
     end
   end
-  return tt.r[k][n]
+  return k ≤ d ? rank(tt,k)[row_qn(core(tt,k))[n]...] : rank(tt,k)[col_qn(core(tt,d))[n]...]
 end
 
-function IdFrame(k::Int, tt::TTvector{T,N,d}) where {T<:Number,N,d}
-  return Frame{T,N,d}(k, [T(1)*I(rank(tt,k)) for k in occupation_qn(N,d,k)])
+function LinearAlgebra.rank(tt::TTvector{T,Nup,Ndn,d}, k::Int, qn::Tuple{Int,Int}) where {T<:Number,Nup,Ndn,d}
+  nup,ndn = qn
+  @boundscheck begin
+    1 ≤ k ≤ d+1 || throw(BoundsError(tt, k))
+    qn ∈ state_qn(Nup,Ndn,d,k) || throw(BoundsError(tt.r[k], qn))
+    if k ≤ d
+      rank(tt,k)[nup,ndn] == core(tt,k).row_ranks[nup,ndn] || throw(DimensionMismatch("Tensor ranks $(tt.r[k]) do not match $k-th core row ranks $(core(tt,k).row_ranks)"))
+    end
+    if k ≥ 2
+      rank(tt,k)[nup,ndn] == core(tt,k-1).col_ranks[nup,ndn] || throw(DimensionMismatch("Tensor ranks $(tt.r[k]) do not match $(k-1)-th core column ranks $(core(tt,k-1).col_ranks)"))
+    end
+  end
+  return rank(tt,k)[nup,ndn]
 end
 
-function IdFrame(::Val{d}, ::Val{N}, k::Int, r::Int=1, ::Type{T}=Float64) where {T<:Number,N,d}
-  return Frame{T,N,d}(k, [T(1)*I(r) for n in occupation_qn(N,d,k)])
+function IdFrame(k::Int, tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
+  blocks = Matrix{Matrix{T}}(undef, Nup+1,Ndn+1)
+  for (nup,ndn) in state_qn(Nup,Ndn,d,k)
+    blocks[nup,ndn] = Matrix{T}(I(rank(tt,k,n)))
+  end
+  return Frame{T,Nup,Ndn,d}(k,blocks)
+end
+
+function IdFrame(::Val{d}, ::Val{Nup}, ::Val{Ndn}, k::Int, r::Int=1, ::Type{T}=Float64) where {T<:Number,Nup,Ndn,d}
+  blocks = Matrix{Matrix{T}}(undef, Nup+1,Ndn+1)
+  for (nup,ndn) in state_qn(Nup,Ndn,d,k)
+    blocks[nup,ndn] = Matrix{T}(I(r))
+  end
+  return Frame{T,Nup,Ndn,d}(k, blocks)
 end
 
 """
-    Array(tt::TTvector{T,N,d}, [sizes::NTuple{d2,Int}])
+    Array(tt::TTvector{T,Nup,Ndn,d}, [sizes::NTuple{d2,Int}])
 
 Return a dense Array representing the same object as `tt`. Optionally you can specify `sizes` to reshape the returned Array.
 """
-function Base.Array(tt::TTvector{T,N,d}, sizes::NTuple{d2,Int}) where {T<:Number,N,d,d2}
-  @assert prod(sizes) == (2^d)*rank(tt,1,0)*rank(tt,d+1,N)
-  e = [reshape([1,0], (1,2,1)), reshape([0,1], (1,2,1))]
-  a = OffsetVector([ones(T,rank(tt,1,0))], axes(core(tt,1),1))
- 
+function Base.Array(tt::TTvector{T,Nup,Ndn,d}, sizes::NTuple{d2,Int}) where {T<:Number,Nup,Ndn,d,d2}
+  @assert prod(sizes) == (4^d)*rank(tt,1,1)*rank(tt,d+1,1)
+
+  a = Matrix{Matrix{T}}(undef,Nup+1,Ndn+1)
+  a[1,1] = Matrix{T}(I(rank(tt,1,(1,1))))
   for k=1:d
-    A = core(tt,k)
-    
-    a = OffsetVector( [ rank(tt,k+1,n) > 0 ? 
-                           sum(
-                            reshape(Array(a[m] * A[m,1+n-m,n]), (:,1,rank(tt,k+1,n))) .* e[1+n-m] 
-                            for m in axes(A,1) ∩ (n-1:n)
-                           ) : zeros(rank(tt,1,0)*2^k, 0)
-                        for n in axes(A,3) 
-                      ], axes(A,3))
-    a = [rank(tt,k+1,n) > 0 ? reshape(a[n], (:,rank(tt,k+1,n))) : a[n] for n in axes(A,3)]
+    Ak = core(tt,k)
+    for rup in reverse(1:Nup+1), rdn in reverse(1:Ndn+1)
+      if (rup,rdn) in col_qn(Ak)
+        if rank(tt,k+1,(rup,rdn)) > 0
+          if (rup  ,rdn  ) in row_qn(Ak)
+            a[rup,rdn] = reshape( reshape(a[rup  ,rdn  ] * ○○(Ak,rup  ,rdn  ), (:,1,rank(tt,k+1,(rup,rdn)))) .* reshape([1,0,0,0], (1,4,1)), (:,rank(tt,k+1,(rup,rdn))))
+          else
+            a[rup,rdn] = zeros(T,rank(tt,1,1)*4^(k-1)*4,rank(tt,k+1,(rup,rdn)))
+          end
+          (rup-1,rdn  ) in row_qn(Ak) && (a[rup,rdn] .+= reshape( reshape(a[rup-1,rdn  ] * up(Ak,rup-1,rdn  ), (:,1,rank(tt,k+1,(rup,rdn)))) .* reshape([0,1,0,0], (1,4,1)), (:,rank(tt,k+1,(rup,rdn)))))
+          (rup  ,rdn-1) in row_qn(Ak) && (a[rup,rdn] .+= reshape( reshape(a[rup  ,rdn-1] * dn(Ak,rup  ,rdn-1), (:,1,rank(tt,k+1,(rup,rdn)))) .* reshape([0,0,1,0], (1,4,1)), (:,rank(tt,k+1,(rup,rdn)))))
+          (rup-1,rdn-1) in row_qn(Ak) && (a[rup,rdn] .+= reshape( reshape(a[rup-1,rdn-1] * ●●(Ak,rup-1,rdn-1), (:,1,rank(tt,k+1,(rup,rdn)))) .* reshape([0,0,0,1], (1,4,1)), (:,rank(tt,k+1,(rup,rdn)))))
+        else
+          a[rup,rdn] = zeros(T,rank(tt,1,1)*4^(k-1)*4,0)
+        end
+      end
+    end
   end
-  a = reshape(a[N], sizes)
+  return reshape(a[Nup+1,Ndn+1], sizes)
 end
 
-function Base.Array(tt::TTvector{T,N,d}) where {T<:Number,N,d}
-  if (rank(tt,1,0) == 1) && (rank(tt,d+1,N) == 1)
-    sizes = ntuple(k->2, d)
-  elseif (rank(tt,1,0) == 1) && (rank(tt,d+1,N) != 1)
-    sizes = ntuple(k->(k == d+1 ? rank(tt,d+1,N) : 2), d+1)
-  elseif (rank(tt,1,0) != 1) && (rank(tt,d+1,N) == 1)
-    sizes = ntuple(k->(k == 1 ? rank(tt,1,0) : 2), d+1)
+function Base.Array(tt::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
+  if (rank(tt,1,1) == 1 && rank(tt,d+1,1) == 1)
+    sizes = ntuple(k->4, d)
+  elseif (rank(tt,1,1) == 1 && rank(tt,d+1,1) != 1)
+    sizes = ntuple(k->(k == d+1 ? rank(tt,d+1,1) : 4), d+1)
+  elseif (rank(tt,1,1) != 1 && rank(tt,d+1,1) == 1)
+    sizes = ntuple(k->(k == 1 ? rank(tt,1,1) : 4), d+1)
   else
-    sizes = ntuple(k->(k==1 ? rank(tt,1,0) : k==d+2 ? rank(tt,d+1,N) : 2), d+2)
+    sizes = ntuple(k->(k==1 ? rank(tt,1,1) : k==d+2 ? rank(tt,d+1,1) : 4), d+2)
   end
   return Array(tt, sizes)
 end

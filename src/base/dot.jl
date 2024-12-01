@@ -1,5 +1,5 @@
 """
-    dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; [orthogonalize=false])
+    dot(tt1::TTvector{T,Nup,Ndn,d}, tt2::TTvector{T,Nup,Ndn,d}; [orthogonalize=false])
 
 Compute the scalar product of two TT-tensors.
 In general, returns a 4D tensor of sizes `(r1[1],r2[1],r1[d+1],r2[d+1])`.
@@ -10,72 +10,58 @@ In general, returns a 4D tensor of sizes `(r1[1],r2[1],r1[d+1],r2[d+1])`.
 If `orthogonalize=true` is specified, performs the left-to-right QRs of `tt1`, `tt2` before the scalar product.
 It increases the accuracy in some cases.
 """
-function LinearAlgebra.dot(tt1::TTvector{T,N,d}, tt2::TTvector{T,N,d}; orthogonalize::Bool=false) where {T<:Number,N,d}
+function LinearAlgebra.dot(tt1::TTvector{T,Nup,Ndn,d}, tt2::TTvector{T,Nup,Ndn,d}; orthogonalize::Bool=false) where {T<:Number,Nup,Ndn,d}
   if (orthogonalize)
     rightOrthogonalize!(tt1)
     rightOrthogonalize!(tt2)
   end
 
-  if rank(tt1,d+1,N)==rank(tt2,d+1,N)==1
-
-  p = IdFrame(Val(d), Val(N), d+1)
-  for k=d:-1:1
-    p = (core(tt2,k) * p) * adjoint(core(tt1,k))
-  end
-  if rank(tt1,1,0)==rank(tt2,1,0)==1
-    return p[0][1,1]
+  if rank(tt1,1,1)==rank(tt2,1,1)==1
+    p = IdFrame(Val(d), Val(Nup), Val(Ndn), 1)
+    for k=1:d
+      p = adjoint(core(tt1,k)) * (p * core(tt2,k))
+    end
+    if rank(tt1,d+1,1)==rank(tt2,d+1,1)==1
+      return p[1][1,1]
+    else
+      return p[1]
+    end
   else
-    return p[0]
-  end
-
-    # p = [n == N ? ones(T,1,1) : zeros(T,0,0) for n in qn]
-
-    # for k=d:-1:1
-    #   for l in axes(core(tt1,k),1)
-    #     Pl = zeros(T, rank(tt1,k,l), rank(tt2,k,l))
-    #     for r in axes(core(tt1,k),3)∩(l:l+1)
-    #       A = core(tt1,k)[l,r]
-    #       B = core(tt2,k)[l,r]
-    #       C = A * p[r] * adjoint(B)
-    #       @. Pl += c * C
-    #     end
-    #     p[l] = Pl
-    #   end
-    # end
-
-    # if rank(tt1,1,0)==rank(tt2,1,0)==1
-    #   return p[0][1]
-    # else
-    #   return p[0]
-    # end
-  else
-    p = [ (n == N ? reshape( I(rank(tt1,d+1,N)*rank(tt2,d+1,N)), 
-                           (rank(tt1,d+1,N), rank(tt2,d+1,N), rank(tt1,d+1,N), rank(tt2,d+1,N)) )
-                  : zeros(T,0,0) ) for n in qn]
-
-    for k=d:-1:1
-      for l in axes(core(tt1,k),1)
-        Pl = zeros(T, rank(tt1,k,l),rank(tt2,d+1,N)*rank(tt1,d+1,N)*rank(tt2,k,l))
-        for r in axes(core(tt1,k),3)∩(l:l+1)
-          A = core(tt1,k)[l,r]
-          B = core(tt2,k)[l,r]
-          C = A * reshape( reshape(p[r], (:,rank(tt2,k+1,r))) * adjoint(B), (rank(tt1,k+1,r),:))
-          @. Pl += c * C
+    p = [ (nup==ndn==1 ? reshape( I(rank(tt1,1,1)*rank(tt2,1,1)), 
+                         (rank(tt1,1,1), rank(tt2,1,1), rank(tt1,1,1), rank(tt2,1,1)) )
+                       : zeros(T,0,0) ) for nup in 1:Nup+1, ndn in 1:Ndn+1]
+    for k=1:d
+      C₁ₖ = core(tt1,k)
+      C₂ₖ = core(tt2,k)
+      for nup in reverse(1:Nup+1), ndn in reverse(1:Ndn+1)
+        if (nup,ndn) in col_qn(C₁ₖ)
+          if (nup,ndn) in row_qn(C₁ₖ)
+            p[nup,ndn] = reshape( adjoint(○○(C₁ₖ,nup,ndn)) * reshape(p[nup,ndn], rank(tt1,k,(nup,ndn)), :), 
+                                          :, rank(tt2,k,(nup,ndn)) ) * ○○(C₂ₖ,nup,ndn)
+          else
+            p[nup,ndn] = zeros(T, rank(tt1,k+1,(nup,ndn)), rank(tt2,1,1), rank(tt1,1,1), rank(tt2,k+1,(nup,ndn)))
+          end
+          (nup-1,ndn  ) in row_qn(C₁ₖ) && p[nup,ndn] .+= reshape( adjoint(up(C₁ₖ,nup-1,ndn  )) * reshape(p[nup-1,ndn  ], rank(tt1,k,(nup-1,ndn  )), :), 
+                                          :, rank(tt2,k,(nup-1,ndn  )) ) * up(C₂ₖ,nup-1,ndn  )
+          (nup  ,ndn-1) in row_qn(C₁ₖ) && p[nup,ndn] .+= reshape( adjoint(dn(C₁ₖ,nup  ,ndn-1)) * reshape(p[nup  ,ndn-1], rank(tt1,k,(nup  ,ndn-1)), :), 
+                                          :, rank(tt2,k,(nup  ,ndn-1)) ) * dn(C₂ₖ,nup  ,ndn-1)
+          (nup-1,ndn-1) in row_qn(C₁ₖ) && p[nup,ndn] .+= reshape( adjoint(●●(C₁ₖ,nup-1,ndn-1)) * reshape(p[nup-1,ndn-1], rank(tt1,k,(nup-1,ndn-1)), :), 
+                                          :, rank(tt2,k,(nup-1,ndn-1)) ) * ●●(C₂ₖ,nup-1,ndn-1)
         end
-        p[l] = reshape(Pl, (rank(tt1,k,l),rank(tt2,d+1,N), rank(tt1,d+1,N),rank(tt2,k,l)))
       end
     end
-    P = permutedims(p[0], [1,4,3,2])
+
+    P = permutedims(p[Nup+1,Ndn+1], [1,4,3,2])
 
     if rank(tt1,d+1,N)==rank(tt2,d+1,N)==1
-      return dropdims(p, dims=(3,4))
+      return dropdims(P, dims=(3,4))
     else
-      return p
+      return P
     end
   end
 end
 
-function step_core_left_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false) where {T<:Number,N,d}
+function step_core_left_norm!!(tt::TTvector{T,Nup,Ndn,d}, k::Int, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   @boundscheck @assert 2 ≤ k ≤ d
 
   if (keepRank)
@@ -95,9 +81,7 @@ function step_core_left_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false
         C[n] ./= nrm
       end
     end
-    set_core!(tt, Qk)
-    set_core!(tt, core(tt,k-1) * C)
-    tt.r[k] = ranks
+    set_cores!(tt, core(tt,k-1) * C, Qk)
   end
   
   if tt.orthogonal && (tt.corePosition == k)
@@ -107,7 +91,7 @@ function step_core_left_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false
   return nrm
 end
 
-function step_core_right_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=false) where {T<:Number,N,d}
+function step_core_right_norm!!(tt::TTvector{T,Nup,Ndn,d}, k::Int, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   @boundscheck @assert 1 ≤ k ≤ d-1
 
   if (keepRank)
@@ -127,9 +111,7 @@ function step_core_right_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=fals
         C[n] ./= nrm
       end
     end
-    set_core!(tt, Qk)
-    set_core!(tt, C * core(tt,k+1))
-    tt.r[k+1] = ranks
+    set_cores!(tt, Qk, C * core(tt,k+1))
   end
 
   if tt.orthogonal && (tt.corePosition == k)
@@ -139,7 +121,7 @@ function step_core_right_norm!!(tt::TTvector{T,N,d}, k::Int, keepRank::Bool=fals
   return nrm
 end
 
-function rightOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where {T<:Number,N,d}
+function rightOrthonormalize!!(tt::TTvector{T,Nup,Ndn,d}, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   nrm=[T(1) for k=1:d]
 
   for k=(tt.orthogonal ? tt.corePosition : d):-1:2
@@ -152,7 +134,7 @@ function rightOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where 
   return tt, nrm
 end
 
-function leftOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where {T<:Number,N,d}
+function leftOrthonormalize!!(tt::TTvector{T,Nup,Ndn,d}, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   nrm=[T(1) for k=1:d]
 
   for k=(tt.orthogonal ? tt.corePosition : 1):d-1
@@ -166,13 +148,13 @@ function leftOrthonormalize!!(tt::TTvector{T,N,d}, keepRank::Bool=false) where {
 end
 
 """
-    norm(tt::TTvector{T,N,d}; orthogonalize::Symbol=:none)
+    norm(tt::TTvector{T,Nup,Ndn,d}; orthogonalize::Symbol=:none)
 
 Compute the Frobenius norm of the TT-tensor.
 
 Optionally you can specify the keywork `orthogonalize` to use a right-left sweep of QRs (`:RL`) or a left-right sweep (`:LR`) to obtain a more accurate result.
 """
-function LinearAlgebra.norm(tt::TTvector{T,N,d}, orthogonalize::Symbol=:none, keepRank::Bool=false) where {T<:Number,N,d}
+function LinearAlgebra.norm(tt::TTvector{T,Nup,Ndn,d}, orthogonalize::Symbol=:none, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   if tt.orthogonal
     return norm(core(tt, tt.corePosition))
   elseif orthogonalize==:none  #Compute dot product of tt with itself
@@ -193,13 +175,13 @@ function LinearAlgebra.norm(tt::TTvector{T,N,d}, orthogonalize::Symbol=:none, ke
 end
 
 """
-    lognorm(tt::TTvector{T,N,d}; orthogonalize::Symbol=:none)
+    lognorm(tt::TTvector{T,Nup,Ndn,d}; orthogonalize::Symbol=:none)
 
 Compute log10 of the Frobenius norm of the TT-tensor.
 
 Optionally you can specify the keywork `orthogonalize` to use a right-left sweep of QRs (`:RL`) or a left-right sweep (`:LR`) to obtain a more accurate result.
 """
-function lognorm(tt::TTvector{T,N,d}, orthogonalize::Symbol=:none, keepRank::Bool=false) where {T<:Number,N,d}
+function lognorm(tt::TTvector{T,Nup,Ndn,d}, orthogonalize::Symbol=:none, keepRank::Bool=false) where {T<:Number,Nup,Ndn,d}
   if tt.orthogonal
     return log10(norm(core(tt, tt.corePosition)))
   elseif orthogonalize==:none

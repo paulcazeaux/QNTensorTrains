@@ -1,7 +1,6 @@
-abstract type AbstractFrame{T<:Number,N,d} <: AbstractArray{T,2} end
 
 """
-  Frame{T<:Number,N,d,S<:Side}
+  Frame{T<:Number,Nup,Ndn,d,S<:Side}
 
 Special block diagonal sparse structure obtained by 
 * left-to-right framing:
@@ -18,89 +17,98 @@ or right-to-left  framing:
         |
   k-1 -->
 
-N is the total number of electrons and d is the overall tensor order; dictates structure
+Nup, Ndn are the total number of spin up/down electrons and d is the overall tensor order; dictates structure
 """
-struct Frame{T<:Number,N,d,M<:AbstractMatrix{T}} <: AbstractFrame{T,N,d}
-  k::Int        # Framed core index
-  n::Int        # column size
+struct Frame{T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}} <: AbstractFrame{T,Nup,Ndn,d}
+  k         :: Int        # Framed core index
+  n         :: Int        # column size
 
-  qn::OffsetArrays.IdOffsetRange{Int64,UnitRange{Int64}}
+  qn        :: Vector{Tuple{Int,Int}}
 
-  row_ranks::OffsetVector{Int, Vector{Int}}
-  col_ranks::OffsetVector{Int, Vector{Int}}
+  row_ranks :: Matrix{Int}
+  col_ranks :: Matrix{Int}
 
-  blocks::OffsetVector{M, Vector{M}}
+  blocks    :: Matrix{M}
 
-  mem::Memory{T}
+  mem       :: Memory{T}
 
-  function Frame{T,N,d}(k::Int,
-                        row_ranks::OffsetVector{Int, Vector{Int}}, 
-                        col_ranks::OffsetVector{Int, Vector{Int}},
-                        mem::Memory{T}, offset::Int=0) where {T<:Number,N,d}
+  function Frame{T,Nup,Ndn,d}(k::Int,
+                        row_ranks::Matrix{Int}, 
+                        col_ranks::Matrix{Int},
+                        mem::Memory{T}, offset::Int=0) where {T<:Number,Nup,Ndn,d}
     @boundscheck begin
-      N ≤ d                   || throw(DimensionMismatch("Total number of electrons $N cannot be larger than dimension $d"))
-      1 ≤ k ≤ d+1             || throw(BoundsError())
+      0≤Nup≤d && 0≤Ndn≤d || throw(DimensionMismatch("Total number of electrons per spin Nup=$Nup,Ndn=$Ndn cannot be larger than dimension $d"))
+      1 ≤ k ≤ d+1 || throw(BoundsError())
     end
 
-    n = min(k-1, N) - min(max(N+k-1-d, 0), N) + 1
-    qn = occupation_qn(N,d,k)
+    qn = state_qn(Nup,Ndn,d,k)
+    n = length(qn)
+
     @boundscheck begin
-      axes(row_ranks,1) == qn || throw(DimensionMismatch("Unexpected quantum number indices for given row ranks array"))
-      axes(col_ranks,1) == qn || throw(DimensionMismatch("Unexpected quantum number indices for given column ranks array"))
+      @assert size(row_ranks) == size(col_ranks) == (Nup+1,Ndn+1)
+      findall(row_ranks.>0) ⊆ CartesianIndex.(qn) || throw(DimensionMismatch("Unexpected quantum number indices for given row ranks array"))
+      findall(col_ranks.>0) ⊆ CartesianIndex.(qn) || throw(DimensionMismatch("Unexpected quantum number indices for given column ranks array"))
     end
 
-    sz = sum(row_ranks[n]*col_ranks[n] for n ∈ qn )
+    sz = sum(row_ranks[nup,ndn]*col_ranks[nup,ndn] for (nup,ndn) in qn )
+
     @boundscheck begin
       @assert length(mem) ≥ offset+sz
     end
 
-    blocks     = OffsetVector(Vector{Matrix{T}}(undef, length(qn)), qn)
+    blocks     = Matrix{Matrix{T}}(undef, Nup+1,Ndn+1)
 
     mem[1+offset:sz+offset] .= T(0)
     idx = 1+offset
-    for n in qn
-      blocks[n] = Block(row_ranks[n],col_ranks[n],mem,idx)
-      idx += length(blocks[n])
+    for (nup,ndn) in qn
+      blocks[nup,ndn] = Block(row_ranks[nup,ndn],col_ranks[nup,ndn],mem,idx)
+      idx += length(blocks[nup,ndn])
     end
 
-    return new{T,N,d,Matrix{T}}(k,n,qn,
+    return new{T,Nup,Ndn,d,Matrix{T}}(k,n,qn,
                         deepcopy(row_ranks),deepcopy(col_ranks),
                         blocks, mem)
   end
 
-  function Frame{T,N,d}(k::Int, blocks::OffsetVector{M,Vector{M}}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
+  function Frame{T,Nup,Ndn,d}(k::Int, blocks::Matrix{M}) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
     @boundscheck begin
-      N ≤ d                   || throw(DimensionMismatch("Total number of electrons $N cannot be larger than dimension $d"))
+      0≤Nup≤d && 0≤Ndn≤d || throw(DimensionMismatch("Total number of electrons per spin Nup=$Nup,Ndn=$Ndn cannot be larger than dimension $d"))
       1 ≤ k ≤ d+1             || throw(BoundsError())
     end
 
-    n = min(k-1, N) - min(max(N+k-1-d, 0), N) + 1
-    qn = occupation_qn(N,d,k)
+    qn = state_qn(Nup,Ndn,d,k)
+    n = length(qn)
+
     @boundscheck begin
-      axes(blocks,1) == qn || throw(DimensionMismatch("Unexpected quantum number indices for given blocks array"))
+      @assert size(blocks) == (Nup+1,Ndn+1) 
+      issetequal(findall(idx->isassigned(blocks,idx), keys(blocks)), CartesianIndex.(qn)) || throw(DimensionMismatch("Unexpected quantum number indices for given blocks array"))
     end
-    row_ranks = [size(blocks[n],1) for n in qn]
-    col_ranks = [size(blocks[n],2) for n in qn]
-    return new{T,N,d,M}(k,n,qn,row_ranks,col_ranks,blocks)
+    row_ranks = zeros(Int,Nup+1,Ndn+1)
+    col_ranks = zeros(Int,Nup+1,Ndn+1)
+    for (nup,ndn) in qn
+      row_ranks[nup,ndn], col_ranks[nup,ndn] = size(blocks[nup,ndn])
+    end
+
+    return new{T,Nup,Ndn,d,M}(k,n,qn,row_ranks,col_ranks,blocks)
   end
 end
 
-function Frame{T,N,d}(k::Int,
-                      row_ranks::OffsetVector{Int, Vector{Int}}, 
-                      col_ranks::OffsetVector{Int, Vector{Int}}) where {T<:Number,N,d}
+function Frame{T,Nup,Ndn,d}(k::Int,
+                      row_ranks::Matrix{Int}, 
+                      col_ranks::Matrix{Int}) where {T<:Number,Nup,Ndn,d}
   mem = Memory{T}(undef,sum(row_ranks.*col_ranks))
-  return Frame{T,N,d}(k,row_ranks,col_ranks,mem)
+  return Frame{T,Nup,Ndn,d}(k,row_ranks,col_ranks,mem)
 end
 
 
-function Base.similar(A::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  return Frame{T,N,d}(A.k,A.row_ranks,A.col_ranks)
+function Base.similar(A::Frame{T,Nup,Ndn,d,M}) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  return Frame{T,Nup,Ndn,d}(A.k,A.row_ranks,A.col_ranks)
 end
 
-function Base.convert(::Type{Frame{T,N,d,Matrix{T}}}, A::Frame{T,N,d,M}) where {T<:Number,N,d,M<:AbstractMatrix{T}}
-  B = Frame{T,N,d}(A.k,A.row_ranks,A.col_ranks)
-  for (a,b) in zip(A.blocks, B.blocks)
-    copyto!(b,a)
+function Base.convert(::Type{Frame{T,Nup,Ndn,d,Matrix{T}}}, A::Frame{T,Nup,Ndn,d,M}) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
+  B = Frame{T,Nup,Ndn,d}(A.k,A.row_ranks,A.col_ranks)
+  for (nup,ndn) in qn(A)
+    block(B,nup,ndn) .= block(A,nup,ndn)
   end
   return B
 end
@@ -114,11 +122,15 @@ end
 end
 
 @inline function Base.axes(A::Frame)
-  return (A.qn, A.qn)
+  return (1:A.n, 1:A.n)
 end
 
 @inline function site(A::Frame)
   return A.k
+end
+
+@inline function qn(A::Frame)
+  return A.qn
 end
 
 @inline function row_ranks(A::Frame)
@@ -138,23 +150,36 @@ end
   return A.blocks
 end
 
+@inline function block(A::Frame, nup::Int, ndn::Int)
+  @boundscheck @assert (nup,ndn) in qn(A)
+  return blocks(A)[nup,ndn]
+end
+@inline function block(A::Frame, qn::Tuple{Int,Int})
+  return block(A,qn[1],qn[2])
+end
 @inline function block(A::Frame, l::Int)
-  return A.blocks[l]
+  return block(A,qn(A)[l])
+end
+
+@inline @propagate_inbounds function Base.getindex(A::AbstractFrame, l::Tuple{Int,Int}, r::Tuple{Int,Int})
+  @boundscheck begin
+    @assert l in qn(A) && r in qn(A)
+    l==r || throw(BoundsError(A, (l,r)))
+  end
+  return @inbounds block(A,l)
 end
 
 @inline @propagate_inbounds function Base.getindex(A::AbstractFrame, l::Int, r::Int)
-  @boundscheck checkbounds(A,l,r)
-  if l == r
-    @inbounds a = block(A,l)
-  else
-    throw(BoundsError(A, (l,r)))
+  @boundscheck begin
+    checkbounds(A,l,r)
+    l==r || throw(BoundsError(A, (l,r)))
   end
-  return a
+  return @inbounds block(A,l)
 end
 
 @inline @propagate_inbounds function Base.getindex(A::AbstractFrame, n::Int)
   @boundscheck checkbounds(A,n,n)
-  return A.blocks[n]
+  return block(A,n)
 end
 
 @inline @propagate_inbounds function Base.setindex!(A::AbstractFrame, X, l::Int, r::Int)
@@ -180,46 +205,46 @@ end
 end
 
 @propagate_inbounds function LinearAlgebra.lmul!(α::Number, B::Frame)
-  for b in B.blocks
-    lmul!(α,b)
+  for (nup,ndn) in qn(B)
+    lmul!(α, block(B,nup,ndn))
   end
   return B
 end
 
 @propagate_inbounds function LinearAlgebra.rmul!(A::Frame, β::Number)
-  for a in A.blocks
-    rmul!(a,β)
+  for (nup,ndn) in qn(A)
+    rmul!(block(A,nup,ndn), β)
   end
   return A
 end
 
-@propagate_inbounds function LinearAlgebra.lmul!(A::Frame{T,N,d,<:AbstractMatrix{T}}, B::Frame{T,N,d,Matrix{T}}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.lmul!(A::Frame{T,Nup,Ndn,d,<:AbstractMatrix{T}}, B::Frame{T,Nup,Ndn,d,Matrix{T}}) where {T<:Number,Nup,Ndn,d}
   @boundscheck site(A) == site(B)
-  for (a,b) in zip(A.blocks, B.blocks)
-    lmul!(a,b)
+  for (nup,ndn) in qn(A)
+    lmul!(block(A,nup,ndn), block(B,nup,ndn))
   end
   return B
 end
 
-@propagate_inbounds function LinearAlgebra.rmul!(A::Frame{T,N,d,Matrix{T}}, B::Frame{T,N,d,<:AbstractMatrix{T}}) where {T<:Number,N,d}
+@propagate_inbounds function LinearAlgebra.rmul!(A::Frame{T,Nup,Ndn,d,Matrix{T}}, B::Frame{T,Nup,Ndn,d,<:AbstractMatrix{T}}) where {T<:Number,Nup,Ndn,d}
   @boundscheck site(A) == site(B)
-  for (a,b) in zip(A.blocks, B.blocks)
-    rmul!(a,b)
+  for (nup,ndn) in qn(A)
+    rmul!(block(A,nup,ndn), block(B,nup,ndn))
   end
   return A
 end
 
 function LinearAlgebra.norm(A::Frame)
-  return sqrt(sum(b->sum(abs2,b), A.blocks))
+  return sqrt(sum(sum(abs2,block(A,qn)) for qn in qn(A)))
 end
 
-@propagate_inbounds function Base.copyto!(dest::Frame{T,N,d}, src::Frame{T,N,d}) where {T<:Number,N,d}
+@propagate_inbounds function Base.copyto!(dest::Frame{T,Nup,Ndn,d}, src::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   @boundscheck begin
     @assert site(dest.parent) == site(src)
     @assert dest.row_ranks == src.row_ranks && dest.col_ranks == src.col_ranks
   end
-  for (a,b) in zip(dest.blocks, src.blocks)
-    copyto!(a,b)
+  for (nup,ndn) in qn(A)
+    copyto!(block(A,nup,ndn), block(B,nup,ndn))
   end
   return dest
 end
