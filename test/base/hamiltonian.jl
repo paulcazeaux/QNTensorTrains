@@ -10,7 +10,7 @@ x0 = randomized_state(d, N, Sz, 1:6)
 for i=1:d, j=1:d
   @test begin
     tij = randn()
-    x = tij * (AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up)) + AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn)))
+    x = AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up), tij) + AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn), tij)
 
     t = zeros(d,d); v = zeros(d,d,d,d)
     t[i,j] = tij; sH = SparseHamiltonian(t,v,N,Sz,d)
@@ -25,11 +25,10 @@ end
 
 T = Float64
 d = 6
-N = 2
+N = 4
 Sz = 0//2
 
 x0 = randomized_state(d, N, Sz, 1:6)
-
 
 for i=1:d, j=1:d, k=1:d, l=1:d
   @test begin
@@ -38,17 +37,26 @@ for i=1:d, j=1:d, k=1:d, l=1:d
     for σ1 in (Up,Dn), σ2 in (Up,Dn)
       Oi, Oj, Ok, Ol = (site=i,spin=σ1), (site=j,spin=σ1), (site=k,spin=σ2), (site=l,spin=σ2)
       if Oi ≠ Ok && Oj ≠ Ol
-        x += AdagᵢAdagⱼAₖAₗ(x0, Oi, Oj, Ok, Ol)
+        x += AdagᵢAdagₖAₗAⱼ(x0, Oi, Oj, Ok, Ol, .5*wijkl)
       end
     end
-    lmul!(wijkl, x)
 
     t = zeros(d,d); v = zeros(d,d,d,d)
-    v[i,j,k,l] = wijkl; sH = SparseHamiltonian(t,v,N,Sz,d)
+    v[i,j,k,l] = wijkl
+
+    sH = SparseHamiltonian(t,v,N,Sz,d)
     y = sH * x0
     z = x-y
+    @show i,j,k,l,norm(z)
 
-    norm(z, :LR) < norm(x, :LR)*1e-12
+    pass = norm(z, :LR) < norm(x, :LR)*1e-12
+    if !pass
+      @show i,j,k,l
+      @show norm(x), norm(y), norm(x-y), norm(x+y)
+      @show [norm(core(x,k)) for k=1:d]
+      @show [norm(core(y,k)) for k=1:d]
+    end
+    pass
   end
 end
 
@@ -93,13 +101,13 @@ for i=1:d-1,j=i+1:d,k=1:d-1,l=k+1:d
     x = zeros(n); y = zeros(n); z = zeros(n)
 
     for i=1:n
-      k, s, idx = g.vertex_labels[i]
+      k, (nup,ndn), s, idx = g.vertex_labels[i]
       if length(idx) == 1
         x[i] = k
-        y[i] = s[1] + .75 * ( (idx-1)/(d-1) -.5)
+        y[i] = s.dn[1] + .75 * ( (idx-1)/(d-1) -.5)
       else
-        x[i] = k + .75 * ( (idx[1]-1)/(d-1) -.5)
-        y[i] = s[1] + .75 * ( (idx[2]-1)/(d-1) -.5)
+        x[i] = k+.25*s.up[1] + .075 * ( (idx[1]-1)/(d-1) -.5)
+        y[i] = .25*s.dn[1] + .075 * ( (idx[2]-1)/(d-1) -.5)
       end
     end
 

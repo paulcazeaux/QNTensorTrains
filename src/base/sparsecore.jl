@@ -370,11 +370,11 @@ end
 
   if s==1 && row_qn(A,l) == col_qn(A,r)            # Unoccupied state
     return ○○(A,l)
-  elseif s==2 && row_qn(A,l) == col_qn(A,r).+(1,0) # Up-spin state
+  elseif s==2 && row_qn(A,l).+(1,0) == col_qn(A,r) # Up-spin state
     return up(A,l)
-  elseif s==3 && row_qn(A,l) == col_qn(A,r).+(0,1) # Down-spin state
+  elseif s==3 && row_qn(A,l).+(0,1) == col_qn(A,r) # Down-spin state
     return dn(A,l)
-  elseif s==4 && row_qn(A,l) == col_qn(A,r).+(1,1) # Doubly occupied state
+  elseif s==4 && row_qn(A,l).+(1,1) == col_qn(A,r) # Doubly occupied state
     return ●●(A,l)
   else # Forbidden
     throw(BoundsError(A, (l,s,r)))

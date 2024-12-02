@@ -134,18 +134,21 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
     function jordanwigner(l::Tuple{Int,Int}, r::Tuple{Int,Int}, w::T, op::@NamedTuple{up::Symbol,dn::Symbol})
       lup,ldn = l
       jw_up = (op.up in (:A, :Adag) && isodd(lup+ldn) ? -1 : 1)
-
       if l==r
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn  ) ? -w : w)
+        # op != (up=:Id,dn=:Id) && @show op, l, :○○, w, jw
         return (l,:○○,jw)
       elseif r == (lup+1,ldn  )
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn+1) ? -w : w)
+        # op != (up=:Id,dn=:Id) && @show op, l, :up, w, jw
         return (l,:up,jw)
       elseif r == (lup  ,ldn+1)
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn  ) ? -w : w)
+        # op != (up=:Id,dn=:Id) && @show op, l, :dn, w, jw
         return (l,:dn,jw)
       elseif r == (lup+1,ldn+1)
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn+1) ? -w : w)
+        # op != (up=:Id,dn=:Id) && @show op, l, :●●, w, jw
         return (l,:●●,jw)
       else
         throw(BoundsError())
@@ -294,7 +297,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         elseif max(j,k,l) < κ ≤ i
           state = (up=(-1,0,1),dn=( 0,1,0));    index =        (i,0)
         else # max(i,j,k,l) < κ
-          state = (up=( 0,0,1),dn=( 0,1,0));    index =        (0,0)
+          state = (up=( 0,1,0),dn=( 0,1,0));    index =        (0,0)
         end
       else
         throw(BoundsError())
@@ -323,7 +326,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         for n₊ in [(nup₊, ndn₊) 
                     for nup₊ in ( op.up == :Id ? (nup₋:nup₋+1  ) :
                                   op.up == :A  ? (nup₋:nup₋    ) :
-                                                 (nup₋+1:nup₋+1)), 
+                                                 (nup₋+1:nup₋+1)),
                         ndn₊ in ( op.dn == :Id ? (ndn₋:ndn₋+1  ) :
                                   op.dn == :A  ? (ndn₋:ndn₋    ) :
                                                  (ndn₋+1:ndn₋+1))] ∩ qn₊
@@ -368,9 +371,9 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
     end
 
     # Two-body terms a†(i↑)a†(k↑)a(l↑)a(j↑) and a†(i↓)a†(k↓)a(l↓)a(j↓)
-    for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d
+    for i=1:d-1, k=i+1:d, l=1:d-1, j=l+1:d
       w = 1/2*(v[i,j,k,l]+v[k,l,i,j]-v[i,l,k,j]-v[k,j,i,l])
-      if abs(w) > ϵ
+      if abs(w) > ϵ 
         for σ in (Up,Dn)
           iσ, jσ, kσ, lσ = (site=i,spin=σ), (site=j,spin=σ), (site=k,spin=σ), (site=l,spin=σ)
           κₘ = weighted_edge(iσ,jσ,kσ,lσ)
@@ -387,11 +390,11 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       end
     end
 
-    # Two-body terms a†(i↑)a†(k↓)a(l↓)a(j↑) and a†(i↑)a†(k↓)a(l↓)a(j↑)
+    # Two-body terms a†(i↑)a†(k↓)a(l↓)a(j↑) and a†(k↓)a†(i↑)a(j↑)a(l↓)
     for i=1:d, j=1:d, k=1:d, l=1:d
       w = 1/2*(v[i,j,k,l]+v[k,l,i,j])
       if abs(w) > ϵ
-        iσ, jσ, kσ, lσ = (site=i,spin=Up), (site=j,spin=Dn), (site=k,spin=Dn), (site=l,spin=Up)
+        iσ, jσ, kσ, lσ = (site=i,spin=Up), (site=j,spin=Up), (site=k,spin=Dn), (site=l,spin=Dn)
         κₘ = weighted_edge(iσ,jσ,kσ,lσ)
         set_edges(κₘ, iσ,jσ,kσ,lσ, ε(iσ,jσ,kσ,lσ)*w)
         for κ=κₘ+1:d
@@ -427,6 +430,14 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
     end
     state_to_index = [ [ Dict(s=>i for (i,s) in enumerate(states[k][nup,ndn])) 
                          for nup=1:Nup+1, ndn=1:Ndn+1 ] for k=1:d+1 ]
+    # Merge indices for k=1 and k=d+1
+    for s in keys(state_to_index[1][1,1])
+      state_to_index[1][1,1][s] = 1
+    end
+    for s in keys(state_to_index[d+1][Nup+1,Ndn+1])
+      state_to_index[d+1][Nup+1,Ndn+1][s] = 1
+    end
+
     state_qns = [ [ [(nup-fluxup,ndn-fluxdn) for (((fluxup,),(fluxdn,)),) in states[k][nup,ndn]] 
                          for nup=1:Nup+1, ndn=1:Ndn+1 ] for k=1:d+1 ]
 

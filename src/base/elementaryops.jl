@@ -28,12 +28,14 @@ function Adag(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     
     B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+ldn) ? -1 : 1
+      jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup+1,ldn) in col_qn(A) ∩ qr
         up(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Adag,dn=:Id), (lup-flux_up,ldn-flux_dn), :○○, jw
       end
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
         ●●(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Adag,dn=:Id), (lup-flux_up,ldn-flux_dn), :dn, jw
       end
     end
     return B, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn
@@ -48,12 +50,14 @@ function Adag(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
       if (lup,ldn+1) in col_qn(A) ∩ qr
-        jw = isodd(lup+ldn) ? -1 : 1
+        jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
         dn(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Id,dn=:Adag), (lup-flux_up,ldn-flux_dn), :○○, jw
       end
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
-        jw = isodd(lup+1+ldn) ? -1 : 1
+        jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
         ●●(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Id,dn=:Adag), (lup-flux_up,ldn-flux_dn), :up, jw
       end
     end
     return B, flux_up, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1
@@ -85,12 +89,14 @@ function A(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     B = SparseCore{T,Nup,Ndn,d}(k,rowranks,colranks)
 
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+ldn) ? -1 : 1
+      jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup,ldn) in col_qn(A) ∩ qr
         ○○(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:A,dn=:Id), (lup-flux_up,ldn-flux_dn), :up, jw
       end
       if (lup,ldn+1) in col_qn(A) ∩ qr
         dn(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:A,dn=:Id), (lup-flux_up,ldn-flux_dn), :●●, jw
       end
     end
 
@@ -104,12 +110,14 @@ function A(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
 
     for (lup,ldn) in row_qn(A) ∩ ql
       if (lup,ldn) in col_qn(A) ∩ qr
-        jw = isodd(lup+ldn) ? -1 : 1
+        jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
         ○○(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Id,dn=:A), (lup-flux_up,ldn-flux_dn), :dn, jw
       end
       if (lup+1,ldn) in col_qn(A) ∩ qr
-        jw = isodd(lup+1+ldn) ? -1 : 1
+        jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
         up(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
+        # @show k, (up=:Id,dn=:A), (lup-flux_up,ldn-flux_dn), :●●, jw
       end
     end
 
@@ -295,7 +303,7 @@ function AN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     
     B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+ldn) ? -1 : 1
+      jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup,ldn+1) in col_qn(A) ∩ qr
         dn(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
       end
@@ -306,7 +314,7 @@ function AN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     
     B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+1+ldn) ? -1 : 1
+      jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup+1,ldn) in col_qn(A) ∩ qr
         up(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
       end
@@ -337,7 +345,7 @@ function AdagN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     
     B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+1+ldn) ? -1 : 1
+      jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
         ●●(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
       end
@@ -348,7 +356,7 @@ function AdagN(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
     
     B = SparseCore{T,Nup,Ndn,d}(k, rowranks, colranks)
     for (lup,ldn) in row_qn(A) ∩ ql
-      jw = isodd(lup+ldn) ? -1 : 1
+      jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
         ●●(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
       end
@@ -470,7 +478,6 @@ function AdagᵢAdagₖAₗAⱼ(tt_in::TTvector{T,Nup,Ndn,d,M}, i::Orbital, j::O
 
    # Corner case
   if (i.spin == k.spin == Up && Nup < 2) || (i.spin == k.spin == Dn && Ndn < 2) || (i.spin ≠ k.spin && (Nup < 1 || Ndn < 1))
-    @show "bip", i, j, k, l, Nup, Ndn
     return tt_zeros(Val(d),Val(Nup),Val(Ndn),T)
   else
     cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
@@ -531,7 +538,6 @@ function AdagᵢAdagₖAₗAⱼ(tt_in::TTvector{T,Nup,Ndn,d,M}, i::Orbital, j::O
     shift_ranks!(col_qn(core(tt_in,d)), ranks[d+1], rank(tt_in, d+1), Nup, Ndn, flux_up, nl_up, nr_up, flux_dn, nl_dn, nr_dn)
 
     tt_out = lmul!(ε(i,j,k,l)*w, TTvector(ranks, cores))
-
     # Sanity check for the ranks
     check(tt_out)
 
@@ -600,8 +606,8 @@ function ε(i::Orbital, j::Orbital)
   return ( i.site<j.site || i == j || (i.site == j.site && i.spin==Dn && j.spin==Up) ? 1 : -1 )
 end
 
-function ε(i::Orbital, k::Orbital, l::Orbital, j::Orbital )
-  p = sortperm([i,j,k,l], lt=(i,j) -> (i.site<j.site || (i.site == j.site && i.spin==Up && j.spin==Dn)) )
+function ε(i::Orbital, j::Orbital, k::Orbital, l::Orbital)
+  p = sortperm([i,k,l,j], lt=(i,j) -> (i.site<j.site || (i.site == j.site && i.spin==Up && j.spin==Dn)) )
   return ε!(p)
 end
 

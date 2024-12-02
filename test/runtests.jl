@@ -1,6 +1,7 @@
 using Test
 using LinearAlgebra
 using QNTensorTrains
+using QNTensorTrains: Spin,Up,Dn
 
 function randomized_state(d::Int, N::Int, Sz::Rational, ranks_range::UnitRange{Int})
     Nup = Int(N+2Sz)÷2

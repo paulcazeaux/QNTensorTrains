@@ -1,6 +1,5 @@
 # one body operator with i < j
 @test begin
-  using QNTensorTrains: Up,Dn,Spin
   T = Float64
   d = 6
 
@@ -8,7 +7,7 @@
 
   x = AdagᵢAⱼ(x0, (site=1,spin=Up),(site=2,spin=Up))
 
-  ref = -(tt_state((1,),(4,),Val(d))+tt_state((1,),(5,),Val(d)))
+  ref = tt_state((1,),(4,),Val(d))+tt_state((1,),(5,),Val(d))
   norm(x-ref) ≈ 0
 end
 
@@ -22,7 +21,7 @@ end
   x0 = tt_state((6,),(4,), Val(d)) + tt_state((6,),(5,), Val(d)) + tt_state((3,),(2,), Val(d))
   x = AdagᵢAⱼ(x0, (site=5,spin=Dn),(site=4,spin=Dn))
   
-  ref = -tt_state((6,),(5,), Val(d))
+  ref = tt_state((6,),(5,), Val(d))
   norm(x - ref) ≈ 0
 end
 
@@ -42,7 +41,7 @@ end
 
   x = AdagᵢAⱼ( AdagᵢAⱼ(x0, (site=2,spin=Up),(site=1,spin=Up)), (site=4,spin=Dn),(site=4,spin=Dn))
 
-  ref = -tt_state((2,),(4,), Val(d))
+  ref = tt_state((2,),(4,), Val(d))
   norm(x - ref, :LR) ≈ 0
 end
 
