@@ -10,7 +10,8 @@ x0 = randomized_state(d, N, Sz, 1:6)
 for i=1:d, j=1:d
   @test begin
     tij = randn()
-    x = AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up), tij) + AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn), tij)
+    x  = AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up), tij)
+    x += AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn), tij)
 
     t = zeros(d,d); v = zeros(d,d,d,d)
     t[i,j] = tij; sH = SparseHamiltonian(t,v,N,Sz,d)
@@ -47,7 +48,6 @@ for i=1:d, j=1:d, k=1:d, l=1:d
     sH = SparseHamiltonian(t,v,N,Sz,d)
     y = sH * x0
     z = x-y
-    @show i,j,k,l,norm(z)
 
     pass = norm(z, :LR) < norm(x, :LR)*1e-12
     if !pass
@@ -62,31 +62,36 @@ end
 
 T = Float64
 d = 6
-N = 3
+N = 4
+Sz = 0//2
 
 using Graphs, MetaGraphsNext, GraphRecipes, Plots
 for i=1:d-1,j=i+1:d
   @test begin
     t = zeros(d,d); v = zeros(d,d,d,d)
     t[i,j] = 2.0
-    H = SparseHamiltonian(t,v,Val(N),Val(d))
+    H = SparseHamiltonian(t,v,N,Sz,d)
     states, g = H.states, H.graph
 
     n = nv(g.graph)
     x = zeros(n); y = zeros(n); z = zeros(n)
 
-    for i=1:n
-      k, m, s, idx = g.vertex_labels[i]
-      x[i] = k + .75 * ( (idx[1]-1)/(d-1) -1/2)
-      y[i] = m+.25*s[1]
-    end
+    # for i=1:n
+    #   k, m, s, idx = g.vertex_labels[i]
+    #   x[i] = k + .75 * ( (idx[1]-1)/(d-1) -1/2)
+    #   y[i] = m+.25*s[1]
+    # end
 
     # display( (i,j) )
     # graphplot(g.graph, x=x, y=y, curves=false)
-
-    u = findfirst(isequal((1,0,(0,0,1),(0,0))), g.vertex_labels)
-    v = findfirst(isequal((d+1,N,(0,1,0),(0,0))), g.vertex_labels)
-    u != nothing && v!= nothing && has_path(g.graph, u, v)
+    Nup = Int(N+2Sz)÷2
+    Ndn = Int(N-2Sz)÷2
+    O = (site=0,spin=Up)
+    u_up = findfirst(isequal((1,(1,1),(up=(0,0,1),dn=(0,0,0)),(O,O))), g.vertex_labels)
+    v_up = findfirst(isequal((d+1,(Nup+1,Ndn+1),(up=(0,1,0),dn=(0,0,0)),(O,O))), g.vertex_labels)
+    u_dn = findfirst(isequal((1,(1,1),(up=(0,0,0),dn=(0,0,1)),(O,O))), g.vertex_labels)
+    v_dn = findfirst(isequal((d+1,(Nup+1,Ndn+1),(up=(0,0,0),dn=(0,1,0)),(O,O))), g.vertex_labels)
+    u_up != nothing && v_up != nothing && has_path(g.graph, u_up, v_up) && u_dn != nothing && v_dn != nothing && has_path(g.graph, u_dn, v_dn)
   end
 end
 
@@ -94,78 +99,95 @@ for i=1:d-1,j=i+1:d,k=1:d-1,l=k+1:d
   @test begin
     t = zeros(d,d); v = zeros(d,d,d,d)
     v[i,j,k,l] = 2.0
-    H = SparseHamiltonian(t,v,Val(N),Val(d))
+    H = SparseHamiltonian(t,v,N,Sz,d)
     states, g = H.states, H.graph
 
-    n = nv(g.graph)
-    x = zeros(n); y = zeros(n); z = zeros(n)
+    # n = nv(g.graph)
+    # x = zeros(n); y = zeros(n); z = zeros(n)
 
-    for i=1:n
-      k, (nup,ndn), s, idx = g.vertex_labels[i]
-      if length(idx) == 1
-        x[i] = k
-        y[i] = s.dn[1] + .75 * ( (idx-1)/(d-1) -.5)
-      else
-        x[i] = k+.25*s.up[1] + .075 * ( (idx[1]-1)/(d-1) -.5)
-        y[i] = .25*s.dn[1] + .075 * ( (idx[2]-1)/(d-1) -.5)
-      end
-    end
+    # for i=1:n
+    #   k, (nup,ndn), s, idx = g.vertex_labels[i]
+    #   if length(idx) == 1
+    #     x[i] = k
+    #     y[i] = s.dn[1] + .75 * ( (idx-1)/(d-1) -.5)
+    #   else
+    #     x[i] = k+.25*s.up[1] + .075 * ( (idx[1]-1)/(d-1) -.5)
+    #     y[i] = .25*s.dn[1] + .075 * ( (idx[2]-1)/(d-1) -.5)
+    #   end
+    # end
 
     # display( (i,j,k,l) )
     # graphplot(g.graph, x=x, y=y, curves=false)
-
-    u = findfirst(isequal((1,0,(0,0,2),(0,0))), g.vertex_labels)
-    v = findfirst(isequal((d+1,N,(0,2,0),(0,0))), g.vertex_labels)
-    u != nothing && v!= nothing && has_path(g.graph, u, v)
+    Nup = Int(N+2Sz)÷2
+    Ndn = Int(N-2Sz)÷2
+    O = (site=0,spin=Up)
+    u_updn = findfirst(isequal((1,(1,1),(up=(0,0,1),dn=(0,0,1)),(O,O))), g.vertex_labels)
+    v_updn = findfirst(isequal((d+1,(Nup+1,Ndn+1),(up=(0,1,0),dn=(0,1,0)),(O,O))), g.vertex_labels)
+    pass = u_updn != nothing && v_updn != nothing && has_path(g.graph, u_updn, v_updn)
+    if i≠k && j≠l
+      u_up   = findfirst(isequal((1,(1,1),(up=(0,0,2),dn=(0,0,0)),(O,O))), g.vertex_labels)
+      v_up   = findfirst(isequal((d+1,(Nup+1,Ndn+1),(up=(0,2,0),dn=(0,0,0)),(O,O))), g.vertex_labels)
+      pass = pass && u_up != nothing && v_up != nothing && has_path(g.graph, u_up, v_up)
+      u_dn   = findfirst(isequal((1,(1,1),(up=(0,0,0),dn=(0,0,2)),(O,O))), g.vertex_labels)
+      v_dn   = findfirst(isequal((d+1,(Nup+1,Ndn+1),(up=(0,0,0),dn=(0,2,0)),(O,O))), g.vertex_labels)
+      pass = pass && u_dn != nothing && v_dn != nothing && has_path(g.graph, u_dn, v_dn)
+    end
+    pass
   end
 end
 
-# Test one-body terms
+# # Test one-body terms
 
-T = Float64
-d = 10
-N = 6
+# T = Float64
+# d = 8
+# N = 3
+# Sz = -1//2
 
-r = [ [ (k in (1,d+1) ? 1 : rand(1:6)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(Val(d),Val(N),r)
+# x0 = randomized_state(d, N, Sz, 1:6)
+# for i=1:d, j=1:d
+#   @test begin
+#     tij = randn()
+#     x  = AdagᵢAⱼ(x0, (site=i,spin=Up), (site=j,spin=Up), tij)
+#     x += AdagᵢAⱼ(x0, (site=i,spin=Dn), (site=j,spin=Dn), tij)
 
-for i=1:d, j=1:d
-  @test begin
-    tij = randn()
-    x = tij * AdagᵢAⱼ(x0, i, j)
+#     t = zeros(d,d); v = zeros(d,d,d,d);
+#     t[i,j] = tij; 
+#     sH = SparseHamiltonian(t,v,N,Sz,d)
+#     y = sH * x0
+#     z = x-y
 
-    t = zeros(d,d); v = zeros(d,d,d,d);
-    t[i,j] = tij; 
-    sH = SparseHamiltonian(t,v,Val(N),Val(d))
-    y = sH * x0
-    z = x-y
+#     norm(z, :LR) < norm(x, :LR)*1e-12
+#   end
+# end
 
-    norm(z, :LR) < norm(x, :LR)*1e-12
-  end
-end
+# # Test two-body terms
 
-# Test two-body terms
+# T = Float64
+# d = 6
+# N = 2
+# Sz = 0
 
-T = Float64
-d = 6
-N = 2
+# x0 = randomized_state(d, N, Sz, 1:6)
 
-r = [ [ (k in (1,d+1) ? 1 : rand(1:6)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-x0 = tt_randn(Val(d),Val(N),r)
+# for i=1:d,j=1:d,k=1:d,l=1:d
+#   @test begin
+#     tijkl = exp(randn())
+#     x = tt_zeros(d,N,Sz,T)
+#     for σ1 in (Up,Dn), σ2 in (Up,Dn)
+#       Oi, Oj, Ok, Ol = (site=i,spin=σ1), (site=j,spin=σ1), (site=k,spin=σ2), (site=l,spin=σ2)
+#       if Oi ≠ Ok && Oj ≠ Ol
+#         x += AdagᵢAdagₖAₗAⱼ(x0, Oi, Oj, Ok, Ol, .5*wijkl)
+#       end
+#     end
+#     t = zeros(d,d); v = zeros(d,d,d,d);
+#     v[i,j,k,l] = tijkl;
+#     sH = SparseHamiltonian(t,v,N,Sz,d)
+#     y = sH * x0
+#     z = x-y
 
-for i=1:d-1, j=i+1:d, k=1:d-1, l=k+1:d #j=((1:i-1) ∪ (i+1:d)), k=1:d-1, l=((1:k-1) ∪ (k+1:d))
-  @test begin
-    tijkl = exp(randn())
-    x = ((i<j ? 1 : -1) * (k<l ? 1 : -1) * tijkl) * AdagᵢAdagⱼAₖAₗ(x0, min(i,j), max(i,j), min(k,l), max(k,l))
-    t = zeros(d,d); v = zeros(d,d,d,d);
-    v[i,j,k,l] = tijkl;
-    sH = SparseHamiltonian(t,v,Val(N),Val(d))
-    y = sH * x0
-    z = x-y
-
-    norm(z, :LR) < norm(x, :LR)*1e-12
-  end
-end
+#     norm(z, :LR) < norm(x, :LR)*1e-12
+#   end
+# end
 
 
 

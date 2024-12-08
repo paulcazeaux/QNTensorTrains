@@ -21,8 +21,8 @@ mutable struct TTtangent{T<:Number,Nup,Ndn,d}
   """
   function TTtangent(baseL::TTvector{T,Nup,Ndn,d}, baseR::TTvector{T,Nup,Ndn,d}, direction::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
     @assert rank(baseL) == rank(baseR)
-    @assert rank(baseL,  1,0) == rank(direction,  1,0) == 1
-    @assert rank(baseL,d+1,N) == rank(directioNup,Ndn,d+1,N) == 1
+    @assert rank(baseL,  1,1) == rank(direction,  1,1) == 1
+    @assert rank(baseL,d+1,1) == rank(direction,d+1,1) == 1
     @assert baseR.orthogonal && baseR.corePosition == 1
     @assert baseL.orthogonal && baseL.corePosition == d
 
@@ -115,7 +115,7 @@ end
 
 LinearAlgebra.rank(dx::TTtangent) = dx.r
 LinearAlgebra.rank(dx::TTtangent, k::Int) = dx.r[k]
-LinearAlgebra.rank(dx::TTtangent, k::Int, n::Int) = dx.r[k][n]
+LinearAlgebra.rank(dx::TTtangent, k::Int, qn::NTuple{2,Int}) = dx.r[k][qn[1],qn[2]]
 
 function LinearAlgebra.axpby!(a::Number, dx::TTtangent{T,Nup,Ndn,d}, b::Number, dy::TTtangent{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   @assert rank(dx) == rank(dy)

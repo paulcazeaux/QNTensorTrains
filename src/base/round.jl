@@ -67,8 +67,6 @@ function round!(tt::TTvector{T,Nup,Ndn,d}, ranks::Vector{Matrix{Int}}) where {T<
   end
 
   leftOrthogonalize!(tt)
-  tt.r = ranks
-
   for k = d:-1:2
     U, sval, Vt = svd_horizontal(core(tt,k))
     rmul!(U, sval)
@@ -82,9 +80,7 @@ function round!(tt::TTvector{T,Nup,Ndn,d}, ranks::Vector{Matrix{Int}}) where {T<
               block(U,nup,ndn), 1:rank(tt,k,(nup,ndn)), 1:ranks[k][nup,ndn])
     end
 
-    set_core!(tt, Xₖ)
-    set_core!(tt, core(tt,k-1) * C)
-    tt.r[k] = ranks[k]
+    set_cores!(tt, core(tt,k-1) * C, Xₖ)
   end
 
   tt.orthogonal = true

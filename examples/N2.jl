@@ -2,46 +2,6 @@ using PythonCall
 using LinearAlgebra
 using QNTensorTrains
 
-using ITensors
-using ITensorChemistry
-
-Bohr = 0.529177249
-molecule = Molecule([Atom("N"),Atom("N",0,0,2.118*Bohr)])
-basis = "sto-3g"
-@show molecule
-
-hf = molecular_orbital_hamiltonian(molecule; basis);
-hamiltonian = hf.hamiltonian;
-hartree_fock_state = hf.hartree_fock_state
-hartree_fock_energy = hf.hartree_fock_energy
-
-# qubit_hamiltonian = jordanwigner(hamiltonian);
-# qubit_state = jordanwigner(hartree_fock_state)
-# @show qubit_hamiltonian[end];
-# println("Number of qubit operators = ", length(qubit_hamiltonian))
-# println("Hartree-Fock state |HF⟩ = |", prod(string.(qubit_state)),"⟩")
-
-# hilbert space
-s = siteinds("Fermion", 2*length(hartree_fock_state); conserve_qns=true)
-fermion_hamiltonian = ITensorChemistry.electron_to_fermion(hamiltonian)
-H = MPO(fermion_hamiltonian, s)
-
-# initialize MPS to HF state
-fermion_hf_state = ITensorChemistry.electron_to_fermion(hartree_fock_state)
-ψhf = MPS(s, fermion_hf_state)
-
-# run dmrg
-# dmrg_kwargs = (;
-#   nsweeps=10,
-#   maxdim=[100,200],
-#   cutoff=1e-12,
-#   noise=[1e-3, 1e-5, 1e-8, 0.0],
-# )
-# @time dmrg_energy, ψ = dmrg(H, ψhf; outputlevel=1, dmrg_kwargs...)
-println("Hartree-Fock Energy: ", hartree_fock_energy)
-# println("DMRG Energy: ", dmrg_energy)
-
-
 pyscf = pyimport("pyscf")
 fci = pyimport("pyscf.fci")
 
@@ -59,9 +19,9 @@ println("RHF Energy (Ha): ", mf.e_tot)
 # Create shorthands for 1- and 2-body integrals in MO basis
 mo = pyconvert(Array, mf.mo_coeff)
 hcore_ao = pyconvert(Array, mf.get_hcore())
-n = size(mo, 1)
+d = size(mo, 1)
 one_body = mo' * hcore_ao * mo
-two_body = reshape(pyconvert(Array, mol.ao2mo(mf.mo_coeff; aosym=1)), n, n, n, n)
+two_body = reshape(pyconvert(Array, mol.ao2mo(mf.mo_coeff; aosym=1)), d, d, d, d)
 
 if basis=="ccpvdz"
     # FCI (i.e. exact diagonalization) from literature
@@ -82,36 +42,19 @@ end
 # Setup for MPS Calculation
 
 
-↑(i) = 2i-1
-↓(i) = 2i
-d = 2n
-
-t = zeros(d,d)
-v = zeros(d,d,d,d)
-for i=1:n, j=1:n
-    t[↑(i),↑(j)] = one_body[i,j]
-    t[↓(i),↓(j)] = one_body[i,j]
-end
-# Mindful of chemists' notation index ordering
-for i=1:n,j=1:n,k=1:n,l=1:n
-    v[↑(i),↑(j),↑(k),↑(l)] = 1/2 * two_body[i,k,j,l]
-    v[↓(i),↓(j),↓(k),↓(l)] = 1/2 * two_body[i,k,j,l]
-    v[↓(i),↑(j),↓(k),↑(l)] = 1/2 * two_body[i,k,j,l]
-    v[↑(i),↓(j),↑(k),↓(l)] = 1/2 * two_body[i,k,j,l]
-end
 
 Threads.nthreads()>1 && BLAS.set_num_threads(1)
 
 s = Vector{Bool}(undef, d)
 mo_occ = pyconvert(Array, mf.mo_occ)
-for i=1:n
+for i=1:d
     ρ = mo_occ[i]
-    s[↑(i)] = s[↓(i)] = (ρ ≈ 0 ? false : (ρ ≈ 2 ? true : error("Occupation at $n is $ρ")))
+    s[i] = (ρ ≈ 0 ? false : (ρ ≈ 2 ? true : error("Occupation at $n is $ρ")))
 end
 e_nuclear = pyconvert(Float64, mf.energy_nuc())
-ψmf = tt_state(s)
+ψmf = tt_state(s, s)
 
-H = SparseHamiltonian(t,v,ψmf; ϵ=1e-6)
+H = SparseHamiltonian(one_body,two_body,ψmf)
 E(ψ) = RayleighQuotient(H, ψ) + e_nuclear
 
 emf = E(ψmf)
@@ -120,15 +63,15 @@ println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_
 println()
 
 
-@time e1, ψ1, _, hist1, res1 = randLanczos(H,ψmf; tol=1e-4, maxIter=20, rmax=150, over=10, reduced=true)
+@time e1, ψ1, _, hist1, res1 = randLanczos(H,ψmf; tol=1e-4, maxIter=20, rmax=25, over=10)
 E1 = E(ψ1)
 display(ψ1)
 @show hist1.+e_nuclear.-e_tot, E1-e_tot
-@time e2, ψ2, _, hist2, res2 = randLanczos(H,ψ1; tol=1e-6, maxIter=20, rmax=150, over=10, reduced=true)
+@time e2, ψ2, _, hist2, res2 = randLanczos(H,ψ1; tol=1e-6, maxIter=20, rmax=50, over=10)
 E2 = E(ψ2)
 display(ψ2)
 @show hist2.+e_nuclear.-e_tot, E2-e_tot
-@time e3, ψ3, _, hist3, res3 = randLanczos(H,ψ2; tol=1e-6, maxIter=20, rmax=200, over=10, reduced=true)
+@time e3, ψ3, _, hist3, res3 = randLanczos(H,ψ2; tol=1e-6, maxIter=20, rmax=100, over=10)
 E3 = E(ψ3)
 display(ψ3)
 @show hist3.+e_nuclear.-e_tot, E3-e_tot

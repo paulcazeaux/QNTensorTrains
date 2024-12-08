@@ -1,4 +1,4 @@
-using PyCall
+using PythonCall
 using LinearAlgebra
 using QNTensorTrains
 
@@ -15,51 +15,26 @@ mf = pyscf.scf.RHF(mol).run()
 println("RHF Energy (Ha): ", mf.e_tot)
 
 # Create shorthands for 1- and 2-body integrals in MO basis
-mo = mf.mo_coeff
-n = size(mo, 1)
-one_body = mo' * mf.get_hcore() * mo
-two_body = reshape(mol.ao2mo(mf.mo_coeff; aosym=1), n, n, n, n)
+mo = pyconvert(Array, mf.mo_coeff)
+hcore_ao = pyconvert(Array, mf.get_hcore())
+d = size(mo, 1)
+one_body = mo' * hcore_ao * mo
+two_body = reshape(pyconvert(Array, mol.ao2mo(mf.mo_coeff; aosym=1)), d, d, d, d)
 
-# # FCI (i.e. exact diagonalization)
-cisolver = fci.FCI(mf)
-cisolver.kernel()
-println("FCI Energy (Ha): ", cisolver.e_tot)
-e_tot = cisolver.e_tot
-
-#
-# Setup for MPS Calculation
-
-
-↑(i) = 2i-1
-↓(i) = 2i
-d = 2n
-
-t = zeros(d,d)
-v = zeros(d,d,d,d)
-for i=1:n, j=1:n
-	t[↑(i),↑(j)] = one_body[i,j]
-	t[↓(i),↓(j)] = one_body[i,j]
-end
-# Mindful of chemists' notation index ordering
-for i=1:n,j=1:n,k=1:n,l=1:n
-    v[↑(i),↑(j),↑(k),↑(l)] = 1/2 * two_body[i,k,j,l]
-    v[↓(i),↓(j),↓(k),↓(l)] = 1/2 * two_body[i,k,j,l]
-    v[↓(i),↑(j),↓(k),↑(l)] = 1/2 * two_body[i,k,j,l]
-    v[↑(i),↓(j),↑(k),↓(l)] = 1/2 * two_body[i,k,j,l]
-end
-# Reduce two-electron term - condense to i<j and k<l terms
-v = QNTensorTrains.Hamiltonian.reduce(v, tol=1e-12)
-
-E(ψ) = RayleighQuotient(ψ,t,v; reduced=true) + e_nuclear
 
 s = Vector{Bool}(undef, d)
-for i=1:n
-    ρ = mf.mo_occ[i]
-    s[↑(i)] = s[↓(i)] = (ρ ≈ 0 ? false : (ρ ≈ 2 ? true : error("Occupation at $n is $ρ")))
+mo_occ = pyconvert(Array, mf.mo_occ)
+for i=1:d
+    ρ = mo_occ[i]
+    s[i] = (ρ ≈ 0 ? false : (ρ ≈ 2 ? true : error("Occupation at $n is $ρ")))
 end
-e_nuclear = mf.energy_nuc()
-ψmf = tt_state(s)
+e_nuclear = pyconvert(Float64, mf.energy_nuc())
+ψmf = tt_state(s, s)
+
+H = SparseHamiltonian(one_body,two_body,ψmf)
+E(ψ) = RayleighQuotient(H, ψ) + e_nuclear
 emf = E(ψmf)
+
 println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
 println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_tot)
 println()

@@ -56,9 +56,8 @@ Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and ov
 function roundRandSum(α::Vector{T1}, summands::Vector{TTvector{T,Nup,Ndn,d,M}}, rmax::Int, over::Int) where {T1<:Number,T<:Number,Nup,Ndn,d,M<:AbstractMatrix}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = over + min(rmax, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = min(over + rmax, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
-  # [[(k∈(1,d+1) ? 1 : rmax+over) for n in QNTensorTrains.state_qn(Nup,Ndn,d,k)] for k=1:d+1]
   return round!(roundRandSum(α,summands,target_r), rmax=rmax)
 end
 
@@ -70,7 +69,7 @@ Truncates the ranks of `tt` with specified ranks `target_r` using a randomized p
 function roundRandSum2(α::Vector{T1}, summands::Vector{TTvector{T,Nup,Ndn,d,M}}, m::Int) where {T1<:Number,T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = min(m, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = min(m, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
   @boundscheck @assert length(α) == length(summands)
   @assert all(all(target_r[  1] .== rank(S,  1)) for S in summands)

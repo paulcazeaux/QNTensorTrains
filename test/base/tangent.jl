@@ -1,14 +1,14 @@
 # Tangent to tt_state
 @test begin
   T = Float64
-  d = 10
+  d = 8
   N = 6
+  Sz = 2//2
 
-  s = [2,4,6,7,8,10]
-  x = tt_state([k∈s for k=1:d])
-
-  r = [ [ (k in (1,d+1) ? 1 : rand(2:4)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  dir = tt_randn(Val(d),Val(N),r)
+  s1 = [2,4,6,8]
+  s2 = [3,6]
+  x = tt_state([k∈s1 for k=1:d], [k∈s2 for k=1:d])
+  dir = randomized_state(d, N, Sz, 2:4)
   dx = TTtangent(x, dir)
 
   ϵ = 1e-6
@@ -22,11 +22,10 @@ end
   T = Float64
   d = 10
   N = 6
+  Sz = 0//2
 
-  r = [ [ (k in (1,d+1) ? 1 : rand(1:5)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = round!(tt_randn(Val(d),Val(N),r))
-  r = [ [ (k in (1,d+1) ? 1 : rand(2:4)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  dir = round!(tt_randn(Val(d),Val(N),r))
+  x = round!(randomized_state(d, N, Sz, 1:5))
+  dir = round!(randomized_state(d, N, Sz, 2:4))
   x = x / norm(x)
   dir = dir / norm(dir)
   dx = TTtangent(x, dir)

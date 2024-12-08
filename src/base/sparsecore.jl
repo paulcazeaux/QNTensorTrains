@@ -988,10 +988,10 @@ C =        |
   end
   check_β = zeros(Bool,Nup+1,Ndn+1)
   for (lup,ldn) in qn(C)
-    in_col_qn(lup  ,ldn  ,A) && (mul!(block(C,lup,ldn), ○○(A,lup,rdn), adjoint(○○(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
-    in_col_qn(lup+1,ldn  ,A) && (mul!(block(C,lup,ldn), up(A,lup,rdn), adjoint(up(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
-    in_col_qn(lup  ,ldn+1,A) && (mul!(block(C,lup,ldn), dn(A,lup,rdn), adjoint(dn(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
-    in_col_qn(lup+1,ldn+1,A) && (mul!(block(C,lup,ldn), ●●(A,lup,rdn), adjoint(●●(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
+    in_col_qn(lup  ,ldn  ,A) && (mul!(block(C,lup,ldn), ○○(A,lup,ldn), adjoint(○○(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
+    in_col_qn(lup+1,ldn  ,A) && (mul!(block(C,lup,ldn), up(A,lup,ldn), adjoint(up(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
+    in_col_qn(lup  ,ldn+1,A) && (mul!(block(C,lup,ldn), dn(A,lup,ldn), adjoint(dn(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
+    in_col_qn(lup+1,ldn+1,A) && (mul!(block(C,lup,ldn), ●●(A,lup,ldn), adjoint(●●(tB,lup,ldn)), α, (check_β[lup,ldn] ? 1 : β)); check_β[lup,ldn] = true)
   end
 
   return C
@@ -1200,10 +1200,10 @@ end
   @boundscheck @assert col_ranks(V) == col_ranks(W)
 
   for (lup,ldn) in row_qn(V)
-    in_col_qn(lup  ,ldn  ,V) && axpy!(α,○○(V,lup,ldn),β, ○○(W,lup,ldn))
-    in_col_qn(lup+1,ldn  ,V) && axpy!(α,up(V,lup,ldn),β, up(W,lup,ldn))
-    in_col_qn(lup  ,ldn+1,V) && axpy!(α,dn(V,lup,ldn),β, dn(W,lup,ldn))
-    in_col_qn(lup+1,ldn+1,V) && axpy!(α,●●(V,lup,ldn),β, ●●(W,lup,ldn))
+    in_col_qn(lup  ,ldn  ,V) && axpby!(α,○○(V,lup,ldn),β, ○○(W,lup,ldn))
+    in_col_qn(lup+1,ldn  ,V) && axpby!(α,up(V,lup,ldn),β, up(W,lup,ldn))
+    in_col_qn(lup  ,ldn+1,V) && axpby!(α,dn(V,lup,ldn),β, dn(W,lup,ldn))
+    in_col_qn(lup+1,ldn+1,V) && axpby!(α,●●(V,lup,ldn),β, ●●(W,lup,ldn))
   end
   return W
 end
@@ -1632,7 +1632,7 @@ function VectorInterface.zerovector(x::SparseCore{T,Nup,Ndn,d}) where {T<:Number
   return SparseCore{T,Nup,Ndn,d}(x.k,row_ranks(x),col_ranks(x))
 end
 
-function VectorInterface.zerovector(x::SparseCore{S,N,d}, T::Type{<:Number}) where {S<:Number,N,d}
+function VectorInterface.zerovector(x::SparseCore{S,Nup,Ndn,d}, T::Type{<:Number}) where {S<:Number,Nup,Ndn,d}
   return SparseCore{T,Nup,Ndn,d}(x.k,row_ranks(x),col_ranks(x))
 end
 

@@ -1,8 +1,8 @@
 module Hamiltonian
 import ..QNTensorTrains
 using ..QNTensorTrains: Orbital, Spin, Up, Dn, Frame, IdFrame, SparseCore, AdjointCore, TTvector
-using ..QNTensorTrains: site, core, ○○, up, dn, ●●, it_○○, it_up, it_dn, it_●●
-using ..QNTensorTrains: row_ranks, col_ranks, row_rank, col_rank, state_qn, row_qn, col_qn, shift_qn, ε, cores2tensor
+using ..QNTensorTrains: site, core, ○○, up, dn, ●●, it_○○, it_up, it_dn, it_●●, block
+using ..QNTensorTrains: row_ranks, col_ranks, row_rank, col_rank, state_qn, row_qn, col_qn, in_row_qn, in_col_qn, shift_qn, ε, cores2tensor
 using LinearAlgebra, OffsetArrays
 
 export SparseHamiltonian, H_matvec_core, RayleighQuotient, xᵀHy
@@ -10,7 +10,7 @@ export SparseHamiltonian, H_matvec_core, RayleighQuotient, xᵀHy
 const OV{T} = OffsetVector{T,Vector{T}}
 const OM{T} = OffsetMatrix{T,Matrix{T}}
 const sparseblock{M} = @NamedTuple{○○::M,up::M,dn::M,●●::M}
-const Ts = Tuple{@NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Int}}
+const Ts = Tuple{@NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Orbital}}
 
 using Graphs, MetaGraphsNext
 struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
@@ -136,49 +136,45 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       jw_up = (op.up in (:A, :Adag) && isodd(lup+ldn) ? -1 : 1)
       if l==r
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn  ) ? -w : w)
-        # op != (up=:Id,dn=:Id) && @show op, l, :○○, w, jw
         return (l,:○○,jw)
       elseif r == (lup+1,ldn  )
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn+1) ? -w : w)
-        # op != (up=:Id,dn=:Id) && @show op, l, :up, w, jw
         return (l,:up,jw)
       elseif r == (lup  ,ldn+1)
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn  ) ? -w : w)
-        # op != (up=:Id,dn=:Id) && @show op, l, :dn, w, jw
         return (l,:dn,jw)
       elseif r == (lup+1,ldn+1)
         jw = jw_up * (op.dn in (:A, :Adag) && isodd(lup+ldn+1) ? -w : w)
-        # op != (up=:Id,dn=:Id) && @show op, l, :●●, w, jw
         return (l,:●●,jw)
       else
         throw(BoundsError())
       end
     end
 
+    # Arbitrary placeholder
+    ⦿ = (site=0,spin=Up)
     # One body states
-    function vertex(κ, iσ::Orbital,jσ::Orbital)
-      @boundscheck @assert iσ.spin == jσ.spin
-      if iσ.spin == jσ.spin == Up
-        i,j = iσ.site, jσ.site
+    function vertex(κ, i::Orbital,j::Orbital)
+      @boundscheck @assert i.spin == j.spin
+      if i.spin == j.spin == Up
         if κ ≤ min(i,j)
-          state = (up=( 0,0,1),dn=( 0,0,0)); index =       (0,0)
+          state = (up=( 0,0,1),dn=( 0,0,0)); index =       (⦿,⦿)
         elseif i < κ ≤ j
-          state = (up=( 1,1,0),dn=( 0,0,0)); index = (κ ≤ hd ? (i,0) : (j,0))
+          state = (up=( 1,1,0),dn=( 0,0,0)); index = (κ ≤ hd ? (i,⦿) : (j,⦿))
         elseif j < κ ≤ i
-          state = (up=(-1,0,1),dn=( 0,0,0)); index = (κ ≤ hd ? (j,0) : (i,0))
+          state = (up=(-1,0,1),dn=( 0,0,0)); index = (κ ≤ hd ? (j,⦿) : (i,⦿))
         else # max(i,j) < κ
-          state = (up=( 0,1,0),dn=( 0,0,0)); index =       (0,0)
+          state = (up=( 0,1,0),dn=( 0,0,0)); index =       (⦿,⦿)
         end
-      elseif iσ.spin == jσ.spin == Dn
-        i,j = iσ.site, jσ.site
+      elseif i.spin == j.spin == Dn
         if κ ≤ min(i,j)
-          state = (up=( 0,0,0),dn=( 0,0,1)); index =       (0,0)
+          state = (up=( 0,0,0),dn=( 0,0,1)); index =       (⦿,⦿)
         elseif i < κ ≤ j
-          state = (up=( 0,0,0),dn=( 1,1,0)); index = (κ ≤ hd ? (i,0) : (j,0))
+          state = (up=( 0,0,0),dn=( 1,1,0)); index = (κ ≤ hd ? (i,⦿) : (j,⦿))
         elseif j < κ ≤ i
-          state = (up=( 0,0,0),dn=(-1,0,1)); index = (κ ≤ hd ? (j,0) : (i,0))
+          state = (up=( 0,0,0),dn=(-1,0,1)); index = (κ ≤ hd ? (j,⦿) : (i,⦿))
         else # max(i,j) < κ
-          state = (up=( 0,0,0),dn=( 0,1,0)); index =       (0,0)
+          state = (up=( 0,0,0),dn=( 0,1,0)); index =       (⦿,⦿)
         end
       end
       return state, index
@@ -217,18 +213,18 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       return continue_path
     end
 
+
     # Two body states
     function vertex(κ, i::Orbital, j::Orbital, k::Orbital, l::Orbital)
       @boundscheck @assert i.spin == j.spin && k.spin == l.spin
       if i.spin == k.spin == Up
-        i,j,k,l = i.site, j.site, k.site, l.site
         @boundscheck @assert i<k && l<j
         if κ ≤ min(i,l)
-          state = (up=( 0,0,2),dn=( 0,0,0));    index =        (0,0)
+          state = (up=( 0,0,2),dn=( 0,0,0));    index =        (⦿,⦿)
         elseif i < κ ≤ min(k,l)
-          state = (up=( 1,1,1),dn=( 0,0,0));    index =        (i,0)
+          state = (up=( 1,1,1),dn=( 0,0,0));    index =        (i,⦿)
         elseif l < κ ≤ min(i,j)
-          state = (up=(-1,0,2),dn=( 0,0,0));    index =        (l,0)
+          state = (up=(-1,0,2),dn=( 0,0,0));    index =        (l,⦿)
         elseif max(i,l) < κ ≤ min(k,j)
           state = (up=( 0,1,1),dn=( 0,0,0));    index = (κ ≤ hd ?  (i,l) : (k,j))
         elseif k < κ ≤ l
@@ -236,21 +232,20 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         elseif j < κ ≤ i
           state = (up=(-2,0,2),dn=( 0,0,0));    index = (κ ≤ hd ?  (l,j) : (i,k))
         elseif max(k,l) < κ ≤ j
-          state = (up=( 1,2,0),dn=( 0,0,0));    index =        (j,0)
+          state = (up=( 1,2,0),dn=( 0,0,0));    index =        (j,⦿)
         elseif max(i,j) < κ ≤ k
-          state = (up=(-1,1,1),dn=( 0,0,0));    index =        (k,0)
+          state = (up=(-1,1,1),dn=( 0,0,0));    index =        (k,⦿)
         else # max(k,j) < κ
-          state = (up=( 0,2,0),dn=( 0,0,0));    index =        (0,0)
+          state = (up=( 0,2,0),dn=( 0,0,0));    index =        (⦿,⦿)
         end 
       elseif i.spin == k.spin == Dn
-        i,j,k,l = i.site, j.site, k.site, l.site
         @boundscheck @assert i<k && l<j
         if κ ≤ min(i,l)
-          state = (up=( 0,0,0),dn=( 0,0,2));    index =        (0,0)
+          state = (up=( 0,0,0),dn=( 0,0,2));    index =        (⦿,⦿)
         elseif i < κ ≤ min(k,l)
-          state = (up=( 0,0,0),dn=( 1,1,1));    index =        (i,0)
+          state = (up=( 0,0,0),dn=( 1,1,1));    index =        (i,⦿)
         elseif l < κ ≤ min(i,j)
-          state = (up=( 0,0,0),dn=(-1,0,2));    index =        (l,0)
+          state = (up=( 0,0,0),dn=(-1,0,2));    index =        (l,⦿)
         elseif max(i,l) < κ ≤ min(k,j)
           state = (up=( 0,0,0),dn=( 0,1,1));    index = (κ ≤ hd ?  (i,l) : (k,j))
         elseif k < κ ≤ l
@@ -258,46 +253,45 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         elseif j < κ ≤ i
           state = (up=( 0,0,0),dn=(-2,0,2));    index = (κ ≤ hd ?  (l,j) : (i,k))
         elseif max(k,l) < κ ≤ j
-          state = (up=( 0,0,0),dn=( 1,2,0));    index =        (j,0)
+          state = (up=( 0,0,0),dn=( 1,2,0));    index =        (j,⦿)
         elseif max(i,j) < κ ≤ k
-          state = (up=( 0,0,0),dn=(-1,1,1));    index =        (k,0)
+          state = (up=( 0,0,0),dn=(-1,1,1));    index =        (k,⦿)
         else # max(k,j) < κ
-          state = (up=( 0,0,0),dn=( 0,2,0));    index =        (0,0)
+          state = (up=( 0,0,0),dn=( 0,2,0));    index =        (⦿,⦿)
         end 
       elseif i.spin == Up && k.spin == Dn
-        i,j,k,l = i.site, j.site, k.site, l.site
         if κ ≤ min(i,j,k,l)
-          state = (up=( 0,0,1),dn=( 0,0,1));    index =        (0,0)
+          state = (up=( 0,0,1),dn=( 0,0,1));    index =        (⦿,⦿)
         elseif i < κ ≤ min(j,k,l)
-          state = (up=( 1,1,0),dn=( 0,0,1));    index =        (i,0)
+          state = (up=( 1,1,0),dn=( 0,0,1));    index =        (i,⦿)
         elseif k < κ ≤ min(i,j,l)
-          state = (up=( 0,0,1),dn=( 1,1,0));    index =        (k,0)
+          state = (up=( 0,0,1),dn=( 1,1,0));    index =        (k,⦿)
         elseif l < κ ≤ min(i,j,k)
-          state = (up=( 0,0,1),dn=(-1,0,1));    index =        (l,0)
+          state = (up=( 0,0,1),dn=(-1,0,1));    index =        (l,⦿)
         elseif j < κ ≤ min(i,k,l)
-          state = (up=(-1,0,1),dn=( 0,0,1));    index =        (j,0)
+          state = (up=(-1,0,1),dn=( 0,0,1));    index =        (j,⦿)
         elseif max(i,k) < κ ≤ min(j,l)
-          state = (up=( 1,1,0),dn=( 1,1,0));    index =  (k ≤ hd ? (i,k) : (l,j))
+          state = (up=( 1,1,0),dn=( 1,1,0));    index =  (κ ≤ hd ? (i,k) : (l,j))
         elseif max(i,l) < κ ≤ min(j,k)
-          state = (up=( 1,1,0),dn=(-1,0,1));    index =  (k ≤ hd ? (i,l) : (k,j))
+          state = (up=( 1,1,0),dn=(-1,0,1));    index =  (κ ≤ hd ? (i,l) : (k,j))
         elseif max(i,j) < κ ≤ min(k,l)
-          state = (up=( 0,1,0),dn=( 0,0,1));    index =  (k ≤ hd ? (i,j) : (k,l))
+          state = (up=( 0,1,0),dn=( 0,0,1));    index =  (κ ≤ hd ? (i,j) : (k,l))
         elseif max(k,l) < κ ≤ min(i,j)
-          state = (up=( 0,0,1),dn=( 0,1,0));    index =  (k ≤ hd ? (k,l) : (i,j))
+          state = (up=( 0,0,1),dn=( 0,1,0));    index =  (κ ≤ hd ? (k,l) : (i,j))
         elseif max(k,j) < κ ≤ min(i,l)
-          state = (up=(-1,0,1),dn=( 1,1,0));    index =  (k ≤ hd ? (k,j) : (i,l))
+          state = (up=(-1,0,1),dn=( 1,1,0));    index =  (κ ≤ hd ? (k,j) : (i,l))
         elseif max(l,j) < κ ≤ min(i,k)
-          state = (up=(-1,0,1),dn=(-1,0,1));    index =  (k ≤ hd ? (l,j) : (i,k))
+          state = (up=(-1,0,1),dn=(-1,0,1));    index =  (κ ≤ hd ? (l,j) : (i,k))
         elseif max(i,k,l) < κ ≤ j
-          state = (up=( 1,1,0),dn=( 0,1,0));    index =        (j,0)
+          state = (up=( 1,1,0),dn=( 0,1,0));    index =        (j,⦿)
         elseif max(i,j,k) < κ ≤ l
-          state = (up=( 0,1,0),dn=( 1,1,0));    index =        (l,0)
+          state = (up=( 0,1,0),dn=( 1,1,0));    index =        (l,⦿)
         elseif max(i,j,l) < κ ≤ k
-          state = (up=( 0,1,0),dn=(-1,0,1));    index =        (k,0)
+          state = (up=( 0,1,0),dn=(-1,0,1));    index =        (k,⦿)
         elseif max(j,k,l) < κ ≤ i
-          state = (up=(-1,0,1),dn=( 0,1,0));    index =        (i,0)
+          state = (up=(-1,0,1),dn=( 0,1,0));    index =        (i,⦿)
         else # max(i,j,k,l) < κ
-          state = (up=( 0,1,0),dn=( 0,1,0));    index =        (0,0)
+          state = (up=( 0,1,0),dn=( 0,1,0));    index =        (⦿,⦿)
         end
       else
         throw(BoundsError())
@@ -331,10 +325,10 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
                                   op.dn == :A  ? (ndn₋:ndn₋    ) :
                                                  (ndn₋+1:ndn₋+1))] ∩ qn₊
           nup₊, ndn₊ = n₊
-          l  = (nup₋-s₋.up[1], ndn₋-s₋.dn[1])
-          r  = (nup₊-s₊.up[1], ndn₊-s₊.dn[1])
+          m₋  = (nup₋-s₋.up[1], ndn₋-s₋.dn[1])
+          m₊  = (nup₊-s₊.up[1], ndn₊-s₊.dn[1])
           continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋)) | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
-          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), jordanwigner(l,r,w,op))
+          add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), jordanwigner(m₋,m₊,w,op))
         end
       end
 
@@ -342,7 +336,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
     end
     graph = MetaGraph(
       DiGraph();                       # Initialize empty graph
-      label_type=Tuple{Int, NTuple{2,Int}, @NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Int} },          
+      label_type=Tuple{Int, NTuple{2,Int}, @NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Orbital} },          
                                        # site, quantum number, state and index
       vertex_data_type=Nothing,        # State details 
       edge_data_type=Tuple{NTuple{2,Int},Symbol,T}, # relevant block indices, coefficient and single-site operator
@@ -369,11 +363,11 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         end
       end
     end
-
-    # Two-body terms a†(i↑)a†(k↑)a(l↑)a(j↑) and a†(i↓)a†(k↓)a(l↓)a(j↓)
+    # Two-body terms a†(i↑)a†(k↑)a(l↑)a(j↑), a†(k↑)a†(i↑)a(j↑)a(l↑), a†(i↑)a†(k↑)a(j↑)a(l↑), a†(k↑)a†(i↑)a(l↑)a(j↑) 
+    #                a†(i↓)a†(k↓)a(l↓)a(j↓), a†(k↓)a†(i↓)a(j↓)a(l↓), a†(i↓)a†(k↓)a(j↓)a(l↓), a†(k↓)a†(i↓)a(l↓)a(j↓)
     for i=1:d-1, k=i+1:d, l=1:d-1, j=l+1:d
       w = 1/2*(v[i,j,k,l]+v[k,l,i,j]-v[i,l,k,j]-v[k,j,i,l])
-      if abs(w) > ϵ 
+      if i≠k && j≠l && abs(w) > ϵ 
         for σ in (Up,Dn)
           iσ, jσ, kσ, lσ = (site=i,spin=σ), (site=j,spin=σ), (site=k,spin=σ), (site=l,spin=σ)
           κₘ = weighted_edge(iσ,jσ,kσ,lσ)
@@ -630,7 +624,7 @@ function Base.:*(Fᴸ::Frame{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d}, x:
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,F,X,I,J,COO,CSC,CSR)
+  function innerkernel!(Y,F,X,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -672,10 +666,12 @@ function Base.:*(Fᴸ::Frame{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d}, x:
 
   function outerkernel!(Y,F,x,nup,ndn,In,Jn,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
-      innerkernel!(Y, F, ○○(x,mup,mdn), In, Jn, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
-      innerkernel!(Y, F, up(x,mup,mdn), In, Jn, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
-      innerkernel!(Y, F, dn(x,mup,mdn), In, Jn, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
-      innerkernel!(Y, F, ●●(x,mup,mdn), In, Jn, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      if in_row_qn(mup, mdn, x)
+        in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, F, ○○(x,mup,mdn), In, Jn, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
+        in_col_qn(mup+1,mdn  ,x) && innerkernel!(Y, F, up(x,mup,mdn), In, Jn, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
+        in_col_qn(mup  ,mdn+1,x) && innerkernel!(Y, F, dn(x,mup,mdn), In, Jn, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
+        in_col_qn(mup+1,mdn+1,x) && innerkernel!(Y, F, ●●(x,mup,mdn), In, Jn, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      end
     end
   end
 
@@ -709,7 +705,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,X,F,I,J,COO,CSC,CSR)
+  function innerkernel!(Y,X,F,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -751,10 +747,12 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
 
   function outerkernel!(Y,x,F,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
-      innerkernel!(Y, ○○(x,mup,mdn), F, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
-      innerkernel!(Y, up(x,mup,mdn), F, I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
-      innerkernel!(Y, dn(x,mup,mdn), F, I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
-      innerkernel!(Y, ●●(x,mup,mdn), F, I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      if in_row_qn(mup, mdn, x)
+        in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, ○○(x,mup,mdn), F, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
+        in_col_qn(mup+1,mdn  ,x) && innerkernel!(Y, up(x,mup,mdn), F, I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
+        in_col_qn(mup  ,mdn+1,x) && innerkernel!(Y, dn(x,mup,mdn), F, I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
+        in_col_qn(mup+1,mdn+1,x) && innerkernel!(Y, ●●(x,mup,mdn), F, I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      end
     end
   end
 
@@ -788,7 +786,7 @@ function Base.:*(l::AdjointCore{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d},
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,L,X,I,J,COO,CSC,CSR)
+  function innerkernel!(Y,L,X,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -830,10 +828,12 @@ function Base.:*(l::AdjointCore{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d},
 
   function outerkernel!(Y,L,x,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
-      innerkernel!(Y, L, ○○(x,mup,mdn), I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
-      innerkernel!(Y, L, up(x,mup,mdn), I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
-      innerkernel!(Y, L, dn(x,mup,mdn), I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
-      innerkernel!(Y, L, ●●(x,mup,mdn), I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      if in_row_qn(mup, mdn, x)
+        in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, L, ○○(x,mup,mdn), I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
+        in_col_qn(mup+1,mdn  ,x) && innerkernel!(Y, L, up(x,mup,mdn), I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
+        in_col_qn(mup  ,mdn+1,x) && innerkernel!(Y, L, dn(x,mup,mdn), I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
+        in_col_qn(mup+1,mdn+1,x) && innerkernel!(Y, L, ●●(x,mup,mdn), I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      end
     end
   end
 
@@ -868,7 +868,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
   CSC = H.csc_blocks[x.k]
 
 
-  function innerkernel!(Y,X,R,I,J,COO,CSC,CSR)
+  function innerkernel!(Y,X,R,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -910,10 +910,12 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
 
   function outerkernel!(Y,x,R,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
-      innerkernel!(Y, ○○(x,mup,mdn), R, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
-      innerkernel!(Y, up(x,mup,mdn), R, I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
-      innerkernel!(Y, dn(x,mup,mdn), R, I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
-      innerkernel!(Y, ●●(x,mup,mdn), R, I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      if in_row_qn(mup, mdn, x)
+        in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, ○○(x,mup,mdn), R, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
+        in_col_qn(mup+1,mdn  ,x) && innerkernel!(Y, up(x,mup,mdn), R, I, J, COO.up[mup,mdn], CSR.up[mup,mdn], CSC.up[mup,mdn])
+        in_col_qn(mup  ,mdn+1,x) && innerkernel!(Y, dn(x,mup,mdn), R, I, J, COO.dn[mup,mdn], CSR.dn[mup,mdn], CSC.dn[mup,mdn])
+        in_col_qn(mup+1,mdn+1,x) && innerkernel!(Y, ●●(x,mup,mdn), R, I, J, COO.●●[mup,mdn], CSR.●●[mup,mdn], CSC.●●[mup,mdn])
+      end
     end
   end
 
@@ -1040,7 +1042,7 @@ function RayleighQuotient(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,N
 # end
 # display(to)
 
-  return block(p,Nup,Ndn)[1]
+  return block(p,Nup+1,Ndn+1)[1]
 end
 
 # using TimerOutputs

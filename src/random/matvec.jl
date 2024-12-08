@@ -49,7 +49,7 @@ Truncates the ranks of `tt` with maximal ranks (or bond dimension) `rmax` and ov
 function randRound_H_MatVec(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, rmax::Int, over::Int) where {T<:Number,Nup,Ndn,d}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = over + min(rmax, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = over + min(rmax, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
   return round_global!(randRound_H_MatVec(H, x,target_r), rmax=rmax)
 end
@@ -63,8 +63,8 @@ end
 """
 function randRound_H_MatVecAdd( α::Vector{T}, H::SparseHamiltonian{T,Nup,Ndn,d}, summands::Vector{TTvector{T,Nup,Ndn,d,S}},
                                target_r::Vector{Matrix{Int}}, to::TimerOutput) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
-  @assert all(target_r[  1][0] == rank(x,  1,0) == 1 for x in summands)
-  @assert all(target_r[d+1][N] == rank(x,d+1,N) == 1 for x in summands)
+  @assert all(target_r[  1][1,1] == rank(x,  1,1) == 1 for x in summands)
+  @assert all(target_r[d+1][Nup+1,Ndn+1] == rank(x,d+1,1) == 1 for x in summands)
 
   # Use left-orthogonalized Gaussian or Rademacher randomized cores for framing
   Ω = tt_randn(Val(d),Val(Nup),Val(Ndn),target_r,orthogonal=:left)
@@ -125,7 +125,10 @@ end
 
 
 function randRound_H_MatVecAdd(α::Vector{T}, H::SparseHamiltonian{T,Nup,Ndn,d}, summands::Vector{TTvector{T,Nup,Ndn,d,S}}, rmax::Int, over::Int, to::TimerOutput) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
-  target_r = [[min(rmax+over, binomial(k-1,n), binomial(d+1-k,N-n)) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
+  target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
+  for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
+    target_r[k][nup,ndn] = min(over + rmax, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
+  end
   return randRound_H_MatVecAdd(α,H,summands,target_r,to)
 end
 
@@ -141,7 +144,7 @@ Truncates the ranks of the matrix-vector product with `tt_in` using randomized p
 function randRound_H_MatVec2(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, m::Int) where {T<:Number,Nup,Ndn,d}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = min(m, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = min(m, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
   @assert all(target_r[  1] .== rank(x,1))
   @assert all(target_r[d+1] .== rank(x,d+1))
@@ -193,7 +196,7 @@ function randRound_H_MatVecAdd2( α::Vector{T}, H::SparseHamiltonian{T,Nup,Ndn,d
                                  m::Int, to::TimerOutput) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = min(m, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = min(m, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
   @assert all(all(target_r[  1] .== rank(x,1)  ) for x in summands)
   @assert all(all(target_r[d+1] .== rank(x,d+1)) for x in summands)

@@ -1,7 +1,7 @@
 using LinearAlgebra, KrylovKit
 
 """
-  x = ALS(t::Matrix{T}, v::Array{T,4}, x0::TTvector{T,N,d}, ε::Float64)
+  x = ALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}, ε::Float64)
 
 Implementation of the Alternative Least Squares algorithm for 
 approximately solving for the ground state `Hx = λx` where `H` is 
@@ -9,12 +9,12 @@ a two-body Hamiltonian given in second quantization format as:
 H = Σ t_ij a†_i a_j + Σ v_ijkl a†_i a†_j a_k a_l
 The result will have the same ranks as the initial guess `x0`.
 """
-function ALS(H::SparseHamiltonian{T,N,d}, x0::TTvector{T,N,d}, ε::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,N,d}
+function ALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}, ε::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,Nup,Ndn,d}
   x = deepcopy(x0)
   return ALS!(H,x,ε,maxIter)
 end
 
-function ALS!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, maxIter::Int) where {T<:Number,N,d}
+function ALS!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, maxIter::Int) where {T<:Number,Nup,Ndn,d}
   # Right-orthogonalize the tensor x if necessary
   x.corePosition == 1 || rightOrthogonalize!(x, keepRank=true)
 
@@ -31,7 +31,7 @@ function ALS!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, ε::Float64, maxI
   return  λ, x
 end
 
-function ALSForwardSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner_tol::T = 1e-8) where {T<:Number,N,d}
+function ALSForwardSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, inner_tol::T = 1e-8) where {T<:Number,Nup,Ndn,d}
   x.corePosition == 1 || rightOrthogonalize!(x, keepRank=true) # Right-orthogonalize the tensor x
   Fᴿ = RightToLeftFraming(H,x)
 
@@ -57,7 +57,7 @@ function ALSForwardSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner
 end
 
 
-function ALSBackSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner_tol::T = 1e-8) where {T<:Number,N,d}
+function ALSBackSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, inner_tol::T = 1e-8) where {T<:Number,Nup,Ndn,d}
   x.corePosition == d || leftOrthogonalize!(x, keepRank=true) # Right-orthogonalize the tensor x
   Fᴸ = LeftToRightFraming(H,x)
 
@@ -81,16 +81,16 @@ function ALSBackSweep!(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}, inner_to
   return λ
 end
 
-function FramedHamiltonian( H::SparseHamiltonian{T,N,d},
-                            Xₖ::SparseCore{T,N,d},
-                            Fᴸ::Frame{T,N,d}, 
-                            Fᴿ::Frame{T,N,d}) where {T<:Number,N,d}
+function FramedHamiltonian( H::SparseHamiltonian{T,Nup,Ndn,d},
+                            Xₖ::SparseCore{T,Nup,Ndn,d},
+                            Fᴸ::Frame{T,Nup,Ndn,d}, 
+                            Fᴿ::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   return (Fᴸ*H*Xₖ) * Fᴿ
 end
 
-function LeftToRightFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) where {T<:Number,N,d}
+function LeftToRightFraming(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   # Recursive contractions to compute frame matrices and vectors from the left
-  Fᴸ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
+  Fᴸ = Vector{Frame{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
   Fᴸ[1] = IdFrame(Val(d), Val(Nup), Val(Ndn), 1)
   for k=2:d
     Fᴸ[k] = FramingStepRight(H,x,Fᴸ[k-1])
@@ -99,9 +99,9 @@ function LeftToRightFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) whe
   return Fᴸ
 end
 
-function RightToLeftFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) where {T<:Number,N,d}
+function RightToLeftFraming(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
   # Recursive contractions to compute frame matrices and vectors from the right
-  Fᴿ = Vector{Frame{T,N,d,Matrix{T}}}(undef, d)
+  Fᴿ = Vector{Frame{T,Nup,Ndn,d,Matrix{T}}}(undef, d)
   Fᴿ[d] = IdFrame(Val(d), Val(Nup), Val(Ndn), d+1)
   for k=d-1:-1:1
     Fᴿ[k] = FramingStepLeft(H,x,Fᴿ[k+1])
@@ -110,17 +110,17 @@ function RightToLeftFraming(H::SparseHamiltonian{T,N,d}, x::TTvector{T,N,d}) whe
   return Fᴿ
 end
 
-function FramingStepRight(H::SparseHamiltonian{T,N,d}, 
-                          x::TTvector{T,N,d},
-                          Fᴸ::Frame{T,N,d}) where {T<:Number,N,d}
+function FramingStepRight(H::SparseHamiltonian{T,Nup,Ndn,d}, 
+                          x::TTvector{T,Nup,Ndn,d},
+                          Fᴸ::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
     k = site(Fᴸ)
     Xₖ = x.cores[k]
     return (adjoint(Xₖ) * Fᴸ) * H * Xₖ
 end
 
-function FramingStepLeft(H::SparseHamiltonian{T,N,d}, 
-                          x::TTvector{T,N,d},
-                          Fᴿ::Frame{T,N,d}) where {T<:Number,N,d}
+function FramingStepLeft(H::SparseHamiltonian{T,Nup,Ndn,d}, 
+                          x::TTvector{T,Nup,Ndn,d},
+                          Fᴿ::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
     k = site(Fᴿ)-1
     Xₖ = x.cores[k]
   return H * Xₖ * (Fᴿ * adjoint(Xₖ))

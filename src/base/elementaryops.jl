@@ -31,11 +31,9 @@ function Adag(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
       jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup+1,ldn) in col_qn(A) ∩ qr
         up(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Adag,dn=:Id), (lup-flux_up,ldn-flux_dn), :○○, jw
       end
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
         ●●(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Adag,dn=:Id), (lup-flux_up,ldn-flux_dn), :dn, jw
       end
     end
     return B, flux_up+1, nl_up+1, nr_up-1, flux_dn, nl_dn, nr_dn
@@ -52,12 +50,10 @@ function Adag(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
       if (lup,ldn+1) in col_qn(A) ∩ qr
         jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
         dn(B,lup,ldn) .= jw .* ○○(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Id,dn=:Adag), (lup-flux_up,ldn-flux_dn), :○○, jw
       end
       if (lup+1,ldn+1) in col_qn(A) ∩ qr
         jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
         ●●(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Id,dn=:Adag), (lup-flux_up,ldn-flux_dn), :up, jw
       end
     end
     return B, flux_up, nl_up, nr_up, flux_dn+1, nl_dn+1, nr_dn-1
@@ -92,11 +88,9 @@ function A(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
       jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
       if (lup,ldn) in col_qn(A) ∩ qr
         ○○(B,lup,ldn) .= jw .* up(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:A,dn=:Id), (lup-flux_up,ldn-flux_dn), :up, jw
       end
       if (lup,ldn+1) in col_qn(A) ∩ qr
         dn(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:A,dn=:Id), (lup-flux_up,ldn-flux_dn), :●●, jw
       end
     end
 
@@ -112,12 +106,10 @@ function A(A::SparseCore{T,Nup,Ndn,d,M}, spin::Spin,
       if (lup,ldn) in col_qn(A) ∩ qr
         jw = isodd(lup-flux_up+ldn-flux_dn) ? -1 : 1
         ○○(B,lup,ldn) .= jw .* dn(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Id,dn=:A), (lup-flux_up,ldn-flux_dn), :dn, jw
       end
       if (lup+1,ldn) in col_qn(A) ∩ qr
         jw = isodd(lup+1-flux_up+ldn-flux_dn) ? -1 : 1
         up(B,lup,ldn) .= jw .* ●●(A,lup-flux_up,ldn-flux_dn)
-        # @show k, (up=:Id,dn=:A), (lup-flux_up,ldn-flux_dn), :●●, jw
       end
     end
 
@@ -603,11 +595,11 @@ end
 # Fermionic anticommutation dictates we fix an order for the operators, 
 # which implies changing sign according to the permutation parity.
 function ε(i::Orbital, j::Orbital)
-  return ( i.site<j.site || i == j || (i.site == j.site && i.spin==Dn && j.spin==Up) ? 1 : -1 )
+  return ( i≤j ? 1 : -1 )
 end
 
 function ε(i::Orbital, j::Orbital, k::Orbital, l::Orbital)
-  p = sortperm([i,k,l,j], lt=(i,j) -> (i.site<j.site || (i.site == j.site && i.spin==Up && j.spin==Dn)) )
+  p = sortperm([i,k,l,j])
   return ε!(p)
 end
 

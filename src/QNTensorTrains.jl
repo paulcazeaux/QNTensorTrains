@@ -17,6 +17,12 @@ abstract type SparseCoreView{T,Nup,Ndn,d} <: AbstractCore{T,Nup,Ndn,d} end
 
 @enum Spin Up=1 Dn=-1
 const Orbital = @NamedTuple{site::Int, spin::Spin}
+@inline Base.:isless(Oi::Orbital, Oj::Orbital) = (Oi.site < Oj.site || (Oi.site == Oj.site && Oi.spin==Up && Oj.spin==Dn))
+@inline Base.:<(Oi::Orbital, κ::Int) = (Oi.site < κ)
+@inline Base.:<(κ::Int, Oi::Orbital) = (κ < Oi.site)
+@inline Base.:≤(Oi::Orbital, κ::Int) = (Oi.site ≤ κ)
+@inline Base.:≤(κ::Int, Oi::Orbital) = (κ ≤ Oi.site)
+Base.convert(::Type{Orbital}, ::Int) = (site=0, spin=Up)
 
 include("base/frame.jl")
 include("base/util.jl")

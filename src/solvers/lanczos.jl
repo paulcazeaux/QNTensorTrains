@@ -1,8 +1,8 @@
 using LinearAlgebra, TimerOutputs
 
 
-function Lanczos( H::SparseHamiltonian{T,N,d}, x0::TTvector{T,N,d};
-                  tol::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,N,d}
+function Lanczos( H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d};
+                  tol::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,Nup,Ndn,d}
   to = TimerOutput()
   
 @timeit to "Orthonormalization" begin
@@ -85,8 +85,8 @@ end
   return λ[end], w, breakdown, λ, res, ranks, rounded_ranks
 end
 
-function randLanczos( H::SparseHamiltonian{T,N,d}, x0::TTvector{T,N,d};
-                  tol::Float64 = 1e-4, rmax=100, over = 5, maxIter::Int = 20, reduced::Bool=false) where {T<:Number,N,d}
+function randLanczos( H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d};
+                  tol::Float64 = 1e-4, rmax=100, over = 5, maxIter::Int = 20) where {T<:Number,Nup,Ndn,d}
   to = TimerOutput()
 
 @timeit to "Orthonormalization" begin

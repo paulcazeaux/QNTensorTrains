@@ -190,17 +190,18 @@ end
   end
 end
 
-@inline @propagate_inbounds function Base.setindex!(A::Frame{T}, X::M, n::Int) where {T<:Number,M<:AbstractMatrix{T}}
+@inline @propagate_inbounds function Base.setindex!(A::Frame{T}, X::M, n::NTuple{2,Int}) where {T<:Number,M<:AbstractMatrix{T}}
+  nup, ndn = n
   @boundscheck begin
-    checkbounds(A, n, n)
-    !isdefined(A, :mem) || size(X) == (A.row_ranks[n],A.col_ranks[n]) || 
-      throw(DimensionMismatch("Trying to assign block of size $(size(X)) to a block of prescribed ranks $((A.row_ranks[n], A.col_ranks[n]))"))
+    @assert n in A.qn
+    !isdefined(A, :mem) || size(X) == (A.row_ranks[nup,ndn],A.col_ranks[nup,ndn]) || 
+      throw(DimensionMismatch("Trying to assign block of size $(size(X)) to a block of prescribed ranks $((A.row_ranks[nup,ndn], A.col_ranks[nup,ndn]))"))
   end
   if isdefined(A, :mem)
-    copyto!(block(A,n), X)
+    copyto!(block(A,nup,ndn), X)
   else
-    A.blocks[n] = X
-    A.row_ranks[n], A.col_ranks[n] = size(X)
+    A.blocks[nup,ndn] = X
+    A.row_ranks[nup,ndn], A.col_ranks[nup,ndn] = size(X)
   end
 end
 

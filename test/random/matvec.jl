@@ -1,8 +1,9 @@
 # randRound_H_MatVec
 @test begin
   T = Float64
-  d = 20
+  d = 10
   N = 7
+  Sz = 1//2
   tol = 1e-3
   ϵ = 1e-4
 
@@ -18,11 +19,10 @@
   end
 
   # Build tensor with rank 5 but ϵ-perturbations of random rank 1 state
-  r = [[(k∈(1,d+1) ? 1 : 5) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = approx_state(Val(d),Val(N),r,ϵ)
+  x = approx_state(Val(d),Val(N),Val(Sz),5:5,ϵ)
 
   # Explicit matvec
-  H = SparseHamiltonian(t,v,Val(N),Val(d))
+  H = SparseHamiltonian(t,v,N,Sz,d)
   yref = H*x
 
   # Compute approximate randomized sum with max ranks M + oversampling
@@ -34,8 +34,9 @@ end
 # randRound_H_MatVec2
 @test begin
   T = Float64
-  d = 20
-  N = 7
+  d = 10
+  N = 8
+  Sz = 0//2
   tol = 1e-3
   ϵ = 1e-4
 
@@ -51,11 +52,11 @@ end
   end
 
   # Build tensor with rank 5 but ϵ-perturbations of random rank 1 state
-  r = [[(k∈(1,d+1) ? 1 : 5) for n in QNTensorTrains.occupation_qn(N,d,k)] for k=1:d+1]
-  x = approx_state(Val(d),Val(N),r,ϵ)
+  x = approx_state(Val(d),Val(N),Val(Sz),5:5,ϵ)
 
   # Explicit matvec
-  H = SparseHamiltonian(t,v,Val(N),Val(d))
+  H = SparseHamiltonian(t,v,N,Sz,d)
+
   yref = H*x
   # Compute approximate randomized sum with max ranks M + oversampling
   y = randRound_H_MatVec2(H, x, 10, 5)
