@@ -48,7 +48,7 @@ where `rmax` should be the maximum target rank and `over` an oversampling parame
 function roundRandOrth2!(x::TTvector{T,Nup,Ndn,d}, m::Int) where {T<:Number,Nup,Ndn,d}
   target_r = [ zeros(Int,Nup+1,Ndn+1) for k=1:d+1]
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
-    target_r[k][nup,ndn] = min(m, binomial(k-1,nup)*binomial(k-1,ndn), binomial(d+1-k,N-nup)*binomial(d+1-k,N-ndn))
+    target_r[k][nup,ndn] = min(m, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
   @assert target_r[  1][1,1] == rank(x,1,0)
   @assert target_r[d+1][Nup+1,Ndn+1] == rank(x,d+1,Nup+1,Ndn+1)

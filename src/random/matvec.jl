@@ -224,11 +224,12 @@ function randRound_H_MatVecAdd2( α::Vector{T}, H::SparseHamiltonian{T,Nup,Ndn,d
   end
 end
 @timeit to "Core assembly" begin
+@timeit to "Frame SₖFᴿ" begin
   SₖFᴿ = [ s == 1 ? 
      H * core(summands[1],d) * lmul!(α[1],IdFrame(Val(d),Val(Nup),Val(Ndn),d+1)) : 
          core(summands[s],d) * lmul!(α[s],IdFrame(Val(d),Val(Nup),Val(Ndn),d+1))
         for s in axes(summands,1)]
-
+end
   for k=d:-1:2
 @timeit to "Frame FᴸSₖFᴿ" begin
     FᴸSₖFᴿ = SparseCore{T,Nup,Ndn,d}(k, Fᴸ[1,k].row_ranks, SₖFᴿ[1].col_ranks)

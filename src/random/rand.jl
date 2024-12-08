@@ -152,7 +152,7 @@ function randd(::Val{d}, ::Val{Nup}, ::Val{Ndn}, k::Int, r::Int, ::Type{T}=Float
   end
 
   Ωₖ = SparseCore{T,Nup,Ndn,d}(k, ○○, up, dn, ●●)
-    return Ωₖ
+  return Ωₖ
 end
 
 """
@@ -312,13 +312,13 @@ function perturbation(tt::TTvector{T,Nup,Ndn,d}, r::Vector{Matrix{Int}}, ϵ::Flo
   if length(r) == d+1
     for k=1:d+1
       for (nup,ndn) in state_qn(Nup,Ndn,d,k)
-        rp[k][nup,ndn] = max(1, r[k][nup,ndn] - rank(tt,k,nup,ndn))
+        rp[k][nup,ndn] = max(1, r[k][nup,ndn] - rank(tt,k)[nup,ndn])
       end
     end
   else # length(r) == d-1
     for k=2:d
       for (nup,ndn) in state_qn(Nup,Ndn,d,k)
-        rp[k][nup,ndn] = max(1, r[k-1][nup,ndn] - rank(tt,k,nup,ndn))
+        rp[k][nup,ndn] = max(1, r[k-1][nup,ndn] - rank(tt,k)[nup,ndn])
       end
     end
   end

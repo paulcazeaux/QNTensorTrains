@@ -21,6 +21,11 @@ d = size(mo, 1)
 one_body = mo' * hcore_ao * mo
 two_body = reshape(pyconvert(Array, mol.ao2mo(mf.mo_coeff; aosym=1)), d, d, d, d)
 
+# FCI (i.e. exact diagonalization)
+cisolver = fci.FCI(mf)
+cisolver.kernel()
+println("FCI Energy (Ha): ", cisolver.e_tot)
+e_tot = pyconvert(Float64, cisolver.e_tot)
 
 s = Vector{Bool}(undef, d)
 mo_occ = pyconvert(Array, mf.mo_occ)
@@ -39,15 +44,19 @@ println("Energy Error from MF MPS (Ha) ", abs(emf - mf.e_tot))
 println("Energy difference between MF MPS and FCI solution (HA) ", mf.e_tot - e_tot)
 println()
 
-@time e1, ψ1, hist1, res1 = randLanczos(t,v,ψmf; tol=1e-12, maxIter=30, rmax=50, reduced=true)
+@time e, ψ = MALS(H, perturbation(ψmf, 10, .1))
+display(ψ)
+@show E(ψ)-e_tot
+
+@time e1, ψ1, _, hist1, res1 = randLanczos(H,ψmf; tol=1e-12, maxIter=30, rmax=10)
 E1 = E(ψ1)
 display(ψ1)
 @show hist1.+e_nuclear.-e_tot, E1-e_tot
-@time e2, ψ2, hist2, res2 = randLanczos(t,v,ψ1; tol=1e-6, maxIter=10, rmax=100, reduced=true)
+@time e2, ψ2, _, hist2, res2 = randLanczos(H,ψ1; tol=1e-6, maxIter=10, rmax=20)
 E2 = E(ψ2)
 display(ψ2)
 @show hist2.+e_nuclear.-e_tot, E2-e_tot
-@time e3, ψ3, hist3, res3 = randLanczos(t,v,ψ2; tol=1e-6, maxIter=10, rmax=150, reduced=true)
+@time e3, ψ3, _, hist3, res3 = randLanczos(H,ψ2; tol=1e-6, maxIter=10, rmax=30)
 E3 = E(ψ3)
 display(ψ3)
 

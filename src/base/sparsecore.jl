@@ -87,15 +87,11 @@ struct SparseCore{T,Nup,Ndn,d,S<:AbstractMatrix{T}} <: AbstractCore{T,Nup,Ndn,d}
 
   # Partial initialization without memory field when fully populated block arrays are provided
   function SparseCore{T,Nup,Ndn,d}(k::Int, ○○::Matrix{S}, up::Matrix{S}, dn::Matrix{S}, ●●::Matrix{S}) where {T<:Number,Nup,Ndn,d,S<:AbstractMatrix{T}}
-    @boundscheck begin
-      N ≤ d                       || throw(DimensionMismatch("Total number of electrons $N cannot be larger than dimension $d"))
-      1 ≤ k ≤ d                   || throw(BoundsError())
-    end
+    row_qn = state_qn(Nup,Ndn,d,k)
+    col_qn = state_qn(Nup,Ndn,d,k+1)
     m = length(row_qn)
     n = length(col_qn)
 
-    row_qn = state_qn(Nup,Ndn,d,k)
-    col_qn = state_qn(Nup,Ndn,d,k+1)
     @boundscheck begin
       @assert size(○○) == size(up) == size(dn) == size(●●) == (Nup+1,Ndn+1)
       @assert issetequal(findall(i->isassigned(○○,i), keys(○○)), CartesianIndex.(collect(it_○○(row_qn,col_qn))))
@@ -123,7 +119,7 @@ struct SparseCore{T,Nup,Ndn,d,S<:AbstractMatrix{T}} <: AbstractCore{T,Nup,Ndn,d}
         @boundscheck begin
           (nup+1,ndn+1) in col_qn && @assert size(dn[nup,ndn],1)==size(●●[nup,ndn],1)
         end
-        row_ranks[nup,ndn] = size(up[nup,ndn],1)
+        row_ranks[nup,ndn] = size(dn[nup,ndn],1)
       elseif (nup+1,ndn+1) in col_qn
         row_ranks[nup,ndn] = size(●●[nup,ndn],1)
       end
@@ -132,22 +128,22 @@ struct SparseCore{T,Nup,Ndn,d,S<:AbstractMatrix{T}} <: AbstractCore{T,Nup,Ndn,d}
     for (nup,ndn) in col_qn
       if (nup,ndn) in row_qn
         @boundscheck begin
-          (nup-1,ndn  ) in col_qn && @assert size(○○[nup  ,ndn  ],2)==size(up[nup-1,ndn  ],2)
-          (nup  ,ndn-1) in col_qn && @assert size(○○[nup  ,ndn  ],2)==size(dn[nup  ,ndn-1],2)
-          (nup-1,ndn-1) in col_qn && @assert size(○○[nup  ,ndn  ],2)==size(●●[nup-1,ndn-1],2)
+          (nup-1,ndn  ) in row_qn && @assert size(○○[nup  ,ndn  ],2)==size(up[nup-1,ndn  ],2)
+          (nup  ,ndn-1) in row_qn && @assert size(○○[nup  ,ndn  ],2)==size(dn[nup  ,ndn-1],2)
+          (nup-1,ndn-1) in row_qn && @assert size(○○[nup  ,ndn  ],2)==size(●●[nup-1,ndn-1],2)
         end
         col_ranks[nup,ndn] = size(○○[nup,ndn],2)
       elseif (nup-1,ndn) in row_qn
         @boundscheck begin
-          (nup  ,ndn+1) in col_qn && @assert size(up[nup-1,ndn  ],2)==size(dn[nup  ,ndn-1],2)
-          (nup+1,ndn+1) in col_qn && @assert size(up[nup-1,ndn  ],2)==size(●●[nup-1,ndn-1],2)
+          (nup  ,ndn-1) in row_qn && @assert size(up[nup-1,ndn  ],2)==size(dn[nup  ,ndn-1],2)
+          (nup-1,ndn-1) in row_qn && @assert size(up[nup-1,ndn  ],2)==size(●●[nup-1,ndn-1],2)
         end
         col_ranks[nup,ndn] = size(up[nup-1,ndn],2)
       elseif (nup,ndn-1) in row_qn
         @boundscheck begin
-          (nup-1,ndn-1) in col_qn && @assert size(dn[nup  ,ndn-1],2)==size(●●[nup-1,ndn-1],2)
+          (nup-1,ndn-1) in row_qn && @assert size(dn[nup  ,ndn-1],2)==size(●●[nup-1,ndn-1],2)
         end
-        col_ranks[nup,ndn] = size(up[nup,ndn-1],2)
+        col_ranks[nup,ndn] = size(dn[nup,ndn-1],2)
       elseif (nup-1,ndn-1) in row_qn
         col_ranks[nup,ndn] = size(●●[nup-1,ndn-1],2)
       end
