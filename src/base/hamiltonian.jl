@@ -11,6 +11,8 @@ const OV{T} = OffsetVector{T,Vector{T}}
 const OM{T} = OffsetMatrix{T,Matrix{T}}
 const sparseblock{M} = @NamedTuple{○○::M,up::M,dn::M,●●::M}
 const Ts = Tuple{@NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Orbital}}
+    # Arbitrary placeholder
+const ⦿ = (site=0,spin=Up)
 
 using Graphs, MetaGraphsNext
 struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
@@ -22,17 +24,29 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
 
   graph::MetaGraph
 
-  function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, N::Int, Sz::Rational, d::Int; ϵ=eps()) where {T<:Number}
+  function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, N::Int, Sz::Rational, d::Int; ϵ::T=eps(T)) where {T<:Number}
     Nup = Int(N+2Sz)÷2
     Ndn = Int(N-2Sz)÷2
-    return SparseHamiltonian(t,v,Val(Nup),Val(Ndn),Val(d); ϵ=ϵ)
+    return SparseHamiltonian(t,v, ϵ, Val(Nup),Val(Ndn),Val(d))
   end
 
-  function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ::Val{Nup}, ::Val{Ndn}, ::Val{d}; ϵ=eps()) where {T<:Number,Nup,Ndn,d}
+  function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ϵ::T, ::Val{Nup}, ::Val{Ndn}, ::Val{d}) where {T<:Number,Nup,Ndn,d}
     @boundscheck @assert size(t) == (d,d)
     @boundscheck @assert size(v) == (d,d,d,d)
     hd = (d+1)÷2
-    
+
+    graph = MetaGraph(
+      DiGraph();                       # Initialize empty graph
+      label_type=Tuple{Int, NTuple{2,Int}, @NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Orbital} },          
+                                       # site, quantum number, state and index
+      vertex_data_type=Nothing,        # State details 
+      edge_data_type=Tuple{NTuple{2,Int},Symbol,T}, # relevant block indices, coefficient and single-site operator
+      weight_function=ed -> ed[3],
+      default_weight=0.,
+      graph_data="Hamiltonian action graph",                  # tag for the whole graph
+    )
+
+
     # Flowchart for left-half cores: 
     # One-Body states
     #               /---A--> 3▲ -S-> 3▲ -Adag-\
@@ -116,7 +130,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
 
 ############################################################
 
-    function occupation(l::Tuple{Int,Int},r::Tuple{Int,Int})
+    @inline function occupation(l::Tuple{Int,Int},r::Tuple{Int,Int})
       lup,ldn = l
       if l==r
         return :○○
@@ -131,7 +145,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       end
     end
 
-    function jordanwigner(l::Tuple{Int,Int}, r::Tuple{Int,Int}, w::T, op::@NamedTuple{up::Symbol,dn::Symbol})
+    @inline function jordanwigner(l::Tuple{Int,Int}, r::Tuple{Int,Int}, w::T, op::@NamedTuple{up::Symbol,dn::Symbol})
       lup,ldn = l
       jw_up = (op.up in (:A, :Adag) && isodd(lup+ldn) ? -1 : 1)
       if l==r
@@ -151,43 +165,43 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       end
     end
 
-    # Arbitrary placeholder
-    ⦿ = (site=0,spin=Up)
     # One body states
-    function vertex(κ, i::Orbital,j::Orbital)
+    @inline function vertex1(κ::Int, i::Orbital, j::Orbital)
       @boundscheck @assert i.spin == j.spin
+
       if i.spin == j.spin == Up
         if κ ≤ min(i,j)
-          state = (up=( 0,0,1),dn=( 0,0,0)); index =       (⦿,⦿)
+          return (up=( 0,0,1),dn=( 0,0,0)),        (⦿,⦿)
         elseif i < κ ≤ j
-          state = (up=( 1,1,0),dn=( 0,0,0)); index = (κ ≤ hd ? (i,⦿) : (j,⦿))
+          return (up=( 1,1,0),dn=( 0,0,0)),  (κ ≤ hd ? (i,⦿) : (j,⦿))
         elseif j < κ ≤ i
-          state = (up=(-1,0,1),dn=( 0,0,0)); index = (κ ≤ hd ? (j,⦿) : (i,⦿))
+          return (up=(-1,0,1),dn=( 0,0,0)),  (κ ≤ hd ? (j,⦿) : (i,⦿))
         else # max(i,j) < κ
-          state = (up=( 0,1,0),dn=( 0,0,0)); index =       (⦿,⦿)
+          return (up=( 0,1,0),dn=( 0,0,0)),        (⦿,⦿)
         end
       elseif i.spin == j.spin == Dn
         if κ ≤ min(i,j)
-          state = (up=( 0,0,0),dn=( 0,0,1)); index =       (⦿,⦿)
+          return (up=( 0,0,0),dn=( 0,0,1)),        (⦿,⦿)
         elseif i < κ ≤ j
-          state = (up=( 0,0,0),dn=( 1,1,0)); index = (κ ≤ hd ? (i,⦿) : (j,⦿))
+          return (up=( 0,0,0),dn=( 1,1,0)),  (κ ≤ hd ? (i,⦿) : (j,⦿))
         elseif j < κ ≤ i
-          state = (up=( 0,0,0),dn=(-1,0,1)); index = (κ ≤ hd ? (j,⦿) : (i,⦿))
+          return (up=( 0,0,0),dn=(-1,0,1)),  (κ ≤ hd ? (j,⦿) : (i,⦿))
         else # max(i,j) < κ
-          state = (up=( 0,0,0),dn=( 0,1,0)); index =       (⦿,⦿)
+          return (up=( 0,0,0),dn=( 0,1,0)),        (⦿,⦿)
         end
+      else
+        throw(BoundsError())
       end
-      return state, index
     end
 
-    function weighted_edge(i::Orbital,j::Orbital)
+    @inline function weighted_edge(i::Orbital,j::Orbital)
       return sort([hd, i.site,j.site])[2]
     end
 
-    function set_edges(κ, i::Orbital, j::Orbital, w::T=T(1))
+    @inline function set_edges1(κ::Int, i::Orbital, j::Orbital, w::T=T(1))
       @boundscheck @assert  1 ≤ κ ≤ d && i.spin == j.spin
-      s₋,idx₋ = vertex(κ,   i,j)
-      s₊,idx₊ = vertex(κ+1, i,j)
+      s₋,idx₋ = vertex1(κ,   i,j)
+      s₊,idx₊ = vertex1(κ+1, i,j)
 
       op = ( κ == i.site == j.site ? (i.spin == Up ? (up=:N,   dn=:Id) : (up=:Id,dn=:N   ) ) :
              κ == j.site           ? (j.spin == Up ? (up=:A,   dn=:Id) : (up=:Id,dn=:A   ) ) :
@@ -206,7 +220,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
           nup₊, ndn₊ = n₊
           l  = (nup₋-s₋.up[1], ndn₋-s₋.dn[1])
           r  = (nup₊-s₊.up[1], ndn₊-s₊.dn[1])
-          continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋)) | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
+          continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋))::Bool | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
           add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), jordanwigner(l,r,w,op))
         end
       end
@@ -215,101 +229,101 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
 
 
     # Two body states
-    function vertex(κ, i::Orbital, j::Orbital, k::Orbital, l::Orbital)
+    @inline function vertex2(κ::Int, i::Orbital, j::Orbital, k::Orbital, l::Orbital)
       @boundscheck @assert i.spin == j.spin && k.spin == l.spin
+
       if i.spin == k.spin == Up
-        @boundscheck @assert i<k && l<j
+        # @boundscheck @assert i<k && l<j
         if κ ≤ min(i,l)
-          state = (up=( 0,0,2),dn=( 0,0,0));    index =        (⦿,⦿)
+          return (up=( 0,0,2),dn=( 0,0,0)),        (⦿,⦿)
         elseif i < κ ≤ min(k,l)
-          state = (up=( 1,1,1),dn=( 0,0,0));    index =        (i,⦿)
+          return (up=( 1,1,1),dn=( 0,0,0)),        (i,⦿)
         elseif l < κ ≤ min(i,j)
-          state = (up=(-1,0,2),dn=( 0,0,0));    index =        (l,⦿)
+          return (up=(-1,0,2),dn=( 0,0,0)),        (l,⦿)
         elseif max(i,l) < κ ≤ min(k,j)
-          state = (up=( 0,1,1),dn=( 0,0,0));    index = (κ ≤ hd ?  (i,l) : (k,j))
+          return (up=( 0,1,1),dn=( 0,0,0)), (κ ≤ hd ?  (i,l) : (k,j))
         elseif k < κ ≤ l
-          state = (up=( 2,2,0),dn=( 0,0,0));    index = (κ ≤ hd ?  (i,k) : (l,j))
+          return (up=( 2,2,0),dn=( 0,0,0)), (κ ≤ hd ?  (i,k) : (l,j))
         elseif j < κ ≤ i
-          state = (up=(-2,0,2),dn=( 0,0,0));    index = (κ ≤ hd ?  (l,j) : (i,k))
+          return (up=(-2,0,2),dn=( 0,0,0)), (κ ≤ hd ?  (l,j) : (i,k))
         elseif max(k,l) < κ ≤ j
-          state = (up=( 1,2,0),dn=( 0,0,0));    index =        (j,⦿)
+          return (up=( 1,2,0),dn=( 0,0,0)),        (j,⦿)
         elseif max(i,j) < κ ≤ k
-          state = (up=(-1,1,1),dn=( 0,0,0));    index =        (k,⦿)
+          return (up=(-1,1,1),dn=( 0,0,0)),        (k,⦿)
         else # max(k,j) < κ
-          state = (up=( 0,2,0),dn=( 0,0,0));    index =        (⦿,⦿)
+          return (up=( 0,2,0),dn=( 0,0,0)),        (⦿,⦿)
         end 
       elseif i.spin == k.spin == Dn
-        @boundscheck @assert i<k && l<j
+        # @boundscheck @assert i<k && l<j
         if κ ≤ min(i,l)
-          state = (up=( 0,0,0),dn=( 0,0,2));    index =        (⦿,⦿)
+          return (up=( 0,0,0),dn=( 0,0,2)),        (⦿,⦿)
         elseif i < κ ≤ min(k,l)
-          state = (up=( 0,0,0),dn=( 1,1,1));    index =        (i,⦿)
+          return (up=( 0,0,0),dn=( 1,1,1)),        (i,⦿)
         elseif l < κ ≤ min(i,j)
-          state = (up=( 0,0,0),dn=(-1,0,2));    index =        (l,⦿)
+          return (up=( 0,0,0),dn=(-1,0,2)),        (l,⦿)
         elseif max(i,l) < κ ≤ min(k,j)
-          state = (up=( 0,0,0),dn=( 0,1,1));    index = (κ ≤ hd ?  (i,l) : (k,j))
+          return (up=( 0,0,0),dn=( 0,1,1)), (κ ≤ hd ?  (i,l) : (k,j))
         elseif k < κ ≤ l
-          state = (up=( 0,0,0),dn=( 2,2,0));    index = (κ ≤ hd ?  (i,k) : (l,j))
+          return (up=( 0,0,0),dn=( 2,2,0)), (κ ≤ hd ?  (i,k) : (l,j))
         elseif j < κ ≤ i
-          state = (up=( 0,0,0),dn=(-2,0,2));    index = (κ ≤ hd ?  (l,j) : (i,k))
+          return (up=( 0,0,0),dn=(-2,0,2)), (κ ≤ hd ?  (l,j) : (i,k))
         elseif max(k,l) < κ ≤ j
-          state = (up=( 0,0,0),dn=( 1,2,0));    index =        (j,⦿)
+          return (up=( 0,0,0),dn=( 1,2,0)),        (j,⦿)
         elseif max(i,j) < κ ≤ k
-          state = (up=( 0,0,0),dn=(-1,1,1));    index =        (k,⦿)
+          return (up=( 0,0,0),dn=(-1,1,1)),        (k,⦿)
         else # max(k,j) < κ
-          state = (up=( 0,0,0),dn=( 0,2,0));    index =        (⦿,⦿)
+          return (up=( 0,0,0),dn=( 0,2,0)),        (⦿,⦿)
         end 
       elseif i.spin == Up && k.spin == Dn
         if κ ≤ min(i,j,k,l)
-          state = (up=( 0,0,1),dn=( 0,0,1));    index =        (⦿,⦿)
+          return (up=( 0,0,1),dn=( 0,0,1)),        (⦿,⦿)
         elseif i < κ ≤ min(j,k,l)
-          state = (up=( 1,1,0),dn=( 0,0,1));    index =        (i,⦿)
+          return (up=( 1,1,0),dn=( 0,0,1)),        (i,⦿)
         elseif k < κ ≤ min(i,j,l)
-          state = (up=( 0,0,1),dn=( 1,1,0));    index =        (k,⦿)
+          return (up=( 0,0,1),dn=( 1,1,0)),        (k,⦿)
         elseif l < κ ≤ min(i,j,k)
-          state = (up=( 0,0,1),dn=(-1,0,1));    index =        (l,⦿)
+          return (up=( 0,0,1),dn=(-1,0,1)),        (l,⦿)
         elseif j < κ ≤ min(i,k,l)
-          state = (up=(-1,0,1),dn=( 0,0,1));    index =        (j,⦿)
+          return (up=(-1,0,1),dn=( 0,0,1)),        (j,⦿)
         elseif max(i,k) < κ ≤ min(j,l)
-          state = (up=( 1,1,0),dn=( 1,1,0));    index =  (κ ≤ hd ? (i,k) : (l,j))
+          return (up=( 1,1,0),dn=( 1,1,0)),  (κ ≤ hd ? (i,k) : (l,j))
         elseif max(i,l) < κ ≤ min(j,k)
-          state = (up=( 1,1,0),dn=(-1,0,1));    index =  (κ ≤ hd ? (i,l) : (k,j))
+          return (up=( 1,1,0),dn=(-1,0,1)),  (κ ≤ hd ? (i,l) : (k,j))
         elseif max(i,j) < κ ≤ min(k,l)
-          state = (up=( 0,1,0),dn=( 0,0,1));    index =  (κ ≤ hd ? (i,j) : (k,l))
+          return (up=( 0,1,0),dn=( 0,0,1)),  (κ ≤ hd ? (i,j) : (k,l))
         elseif max(k,l) < κ ≤ min(i,j)
-          state = (up=( 0,0,1),dn=( 0,1,0));    index =  (κ ≤ hd ? (k,l) : (i,j))
+          return (up=( 0,0,1),dn=( 0,1,0)),  (κ ≤ hd ? (k,l) : (i,j))
         elseif max(k,j) < κ ≤ min(i,l)
-          state = (up=(-1,0,1),dn=( 1,1,0));    index =  (κ ≤ hd ? (k,j) : (i,l))
+          return (up=(-1,0,1),dn=( 1,1,0)),  (κ ≤ hd ? (k,j) : (i,l))
         elseif max(l,j) < κ ≤ min(i,k)
-          state = (up=(-1,0,1),dn=(-1,0,1));    index =  (κ ≤ hd ? (l,j) : (i,k))
+          return (up=(-1,0,1),dn=(-1,0,1)),  (κ ≤ hd ? (l,j) : (i,k))
         elseif max(i,k,l) < κ ≤ j
-          state = (up=( 1,1,0),dn=( 0,1,0));    index =        (j,⦿)
+          return (up=( 1,1,0),dn=( 0,1,0)),        (j,⦿)
         elseif max(i,j,k) < κ ≤ l
-          state = (up=( 0,1,0),dn=( 1,1,0));    index =        (l,⦿)
+          return (up=( 0,1,0),dn=( 1,1,0)),        (l,⦿)
         elseif max(i,j,l) < κ ≤ k
-          state = (up=( 0,1,0),dn=(-1,0,1));    index =        (k,⦿)
+          return (up=( 0,1,0),dn=(-1,0,1)),        (k,⦿)
         elseif max(j,k,l) < κ ≤ i
-          state = (up=(-1,0,1),dn=( 0,1,0));    index =        (i,⦿)
+          return (up=(-1,0,1),dn=( 0,1,0)),        (i,⦿)
         else # max(i,j,k,l) < κ
-          state = (up=( 0,1,0),dn=( 0,1,0));    index =        (⦿,⦿)
+          return (up=( 0,1,0),dn=( 0,1,0)),        (⦿,⦿)
         end
       else
         throw(BoundsError())
       end
-      return state, index
     end
 
-    function weighted_edge(i::Orbital,j::Orbital,k::Orbital,l::Orbital)
+    @inline function weighted_edge(i::Orbital,j::Orbital,k::Orbital,l::Orbital)
       return sort([hd, i.site,j.site,k.site,l.site])[3]
     end 
 
-    function set_edges(κ::Int, i::Orbital,j::Orbital,k::Orbital,l::Orbital, w=T(1))
-      @assert i.spin == j.spin && k.spin == l.spin && 1 ≤ κ ≤ d
+    @inline function set_edges2(κ::Int, i::Orbital,j::Orbital,k::Orbital,l::Orbital, w::T=T(1))
+      @boundscheck @assert i.spin == j.spin && k.spin == l.spin && 1 ≤ κ ≤ d
 
-      s₋,idx₋ = vertex(κ,   i,j,k,l)
-      s₊,idx₊ = vertex(κ+1, i,j,k,l)
+      s₋, idx₋ = vertex2(κ,   i,j,k,l)
+      s₊, idx₊ = vertex2(κ+1, i,j,k,l)
 
-      spin_op(Oκ::Orbital) = (Oκ∈(i,k) && Oκ∈(j,l) ? :N : Oκ∈(i,k) ? :Adag : Oκ∈(j,l) ? :A : :Id)
+      @inline spin_op(Oκ::Orbital) = (Oκ∈(i,k) && Oκ∈(j,l) ? :N : Oκ∈(i,k) ? :Adag : Oκ∈(j,l) ? :A : :Id)
       op = (up = spin_op((site=κ,spin=Up)), dn = spin_op((site=κ,spin=Dn)))
 
       qn₋ = shift_qn(state_qn(Nup,Ndn,d,κ  ), Nup,Ndn,s₋.up...,s₋.dn...)
@@ -327,23 +341,13 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
           nup₊, ndn₊ = n₊
           m₋  = (nup₋-s₋.up[1], ndn₋-s₋.dn[1])
           m₊  = (nup₊-s₊.up[1], ndn₊-s₊.dn[1])
-          continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋)) | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
+          continue_path = add_vertex!(graph, (κ,n₋,s₋,idx₋))::Bool | add_vertex!(graph, (κ+1,n₊,s₊,idx₊)) || continue_path
           add_edge!(graph, (κ,n₋,s₋,idx₋), (κ+1,n₊,s₊,idx₊), jordanwigner(m₋,m₊,w,op))
         end
       end
 
       return continue_path
     end
-    graph = MetaGraph(
-      DiGraph();                       # Initialize empty graph
-      label_type=Tuple{Int, NTuple{2,Int}, @NamedTuple{up::NTuple{3,Int},dn::NTuple{3,Int}}, NTuple{2,Orbital} },          
-                                       # site, quantum number, state and index
-      vertex_data_type=Nothing,        # State details 
-      edge_data_type=Tuple{NTuple{2,Int},Symbol,T}, # relevant block indices, coefficient and single-site operator
-      weight_function=ed -> ed[3],
-      default_weight=0.,
-      graph_data="Hamiltonian action graph",                  # tag for the whole graph
-    )
 
     for i=1:d, j=1:d
       if abs(t[i,j]) > ϵ
@@ -351,14 +355,12 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
           iσ = (site=i,spin=σ)
           jσ = (site=j,spin=σ)
           κₘ = weighted_edge(iσ,jσ)
-          set_edges(κₘ, iσ,jσ, ε(iσ,jσ)*t[i,j])
+          set_edges1(κₘ, iσ,jσ, ε(iσ,jσ)*t[i,j])
           for κ=κₘ+1:d
-            continue_path = set_edges(κ, iσ, jσ) 
-            continue_path || break
+            set_edges1(κ, iσ, jσ) || break
           end
           for κ = κₘ-1:-1:1
-            continue_path = set_edges(κ, iσ, jσ) 
-            continue_path || break
+            set_edges1(κ, iσ, jσ) || break
           end
         end
       end
@@ -371,14 +373,12 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
         for σ in (Up,Dn)
           iσ, jσ, kσ, lσ = (site=i,spin=σ), (site=j,spin=σ), (site=k,spin=σ), (site=l,spin=σ)
           κₘ = weighted_edge(iσ,jσ,kσ,lσ)
-          set_edges(κₘ, iσ,jσ,kσ,lσ, ε(iσ,jσ,kσ,lσ)*w)
+          set_edges2(κₘ, iσ,jσ,kσ,lσ, ε(iσ,jσ,kσ,lσ)*w)
           for κ=κₘ+1:d
-            continue_path = set_edges(κ, iσ,jσ,kσ,lσ) 
-            continue_path || break
+            set_edges2(κ, iσ,jσ,kσ,lσ) || break
           end
           for κ = κₘ-1:-1:1
-            continue_path = set_edges(κ, iσ,jσ,kσ,lσ) 
-            continue_path || break
+            set_edges2(κ, iσ,jσ,kσ,lσ) || break
           end
         end
       end
@@ -390,14 +390,12 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
       if abs(w) > ϵ
         iσ, jσ, kσ, lσ = (site=i,spin=Up), (site=j,spin=Up), (site=k,spin=Dn), (site=l,spin=Dn)
         κₘ = weighted_edge(iσ,jσ,kσ,lσ)
-        set_edges(κₘ, iσ,jσ,kσ,lσ, ε(iσ,jσ,kσ,lσ)*w)
+        set_edges2(κₘ, iσ,jσ,kσ,lσ, ε(iσ,jσ,kσ,lσ)*w)
         for κ=κₘ+1:d
-          continue_path = set_edges(κ, iσ,jσ,kσ,lσ) 
-          continue_path || break
+          set_edges2(κ, iσ,jσ,kσ,lσ) || break
         end
         for κ = κₘ-1:-1:1
-          continue_path = set_edges(κ, iσ,jσ,kσ,lσ) 
-          continue_path || break
+          set_edges2(κ, iσ,jσ,kσ,lσ) || break
         end
       end
     end
@@ -442,7 +440,7 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
        ●● = collect(it_●●(state_qn(Nup,Ndn,d,k),state_qn(Nup,Ndn,d,k+1)))
            ) for k=1:d ]
 
-    wrap(f) = [(
+    @inline wrap(f) = [(
       ○○ = [ 
         ( ○○ = OffsetMatrix([ f(k,nup,ndn,:○○,mup,mdn,:○○) for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)], max(1,nup-2):min(Nup+1,nup+2), max(1,ndn-2):min(Ndn+1,ndn+2)),
           up = OffsetMatrix([ f(k,nup,ndn,:○○,mup,mdn,:up) for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)], max(1,nup-2):min(Nup+1,nup+2), max(1,ndn-2):min(Ndn+1,ndn+2)),
@@ -548,8 +546,8 @@ struct SparseHamiltonian{T<:Number,Nup,Ndn,d}
   end
 end
 
-function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ψ::TTvector{T,Nup,Ndn,d}; ϵ=eps()) where {T<:Number,Nup,Ndn,d}
-  return SparseHamiltonian(t,v,Val(Nup),Val(Ndn),Val(d); ϵ=ϵ)
+function SparseHamiltonian(t::Matrix{T}, v::Array{T,4}, ψ::TTvector{T,Nup,Ndn,d}; ϵ::T=eps(T)) where {T<:Number,Nup,Ndn,d}
+  return SparseHamiltonian(t,v,ϵ, Val(Nup),Val(Ndn),Val(d))
 end
 
 function QNTensorTrains.row_ranks(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d,M}) where {T<:Number,Nup,Ndn,d,M<:AbstractMatrix{T}}
