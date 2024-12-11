@@ -624,7 +624,7 @@ function Base.:*(Fᴸ::Frame{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d}, x:
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,F,X,I,J,COO,CSR,CSC)
+  @inline function innerkernel!(Y,F,X,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -664,7 +664,7 @@ function Base.:*(Fᴸ::Frame{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d}, x:
     end
   end
 
-  function outerkernel!(Y,F,x,nup,ndn,In,Jn,COO,CSR,CSC)
+  @inline function outerkernel!(Y,F,x,nup,ndn,In,Jn,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
       if in_row_qn(mup, mdn, x)
         in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, F, ○○(x,mup,mdn), In, Jn, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
@@ -705,7 +705,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,X,F,I,J,COO,CSR,CSC)
+  @inline function innerkernel!(Y,X,F,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -745,7 +745,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
     end
   end
 
-  function outerkernel!(Y,x,F,nup,ndn,I,J,COO,CSR,CSC)
+  @inline function outerkernel!(Y,x,F,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
       if in_row_qn(mup, mdn, x)
         in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, ○○(x,mup,mdn), F, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
@@ -786,7 +786,7 @@ function Base.:*(l::AdjointCore{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d},
   CSR = H.csr_blocks[x.k]
   CSC = H.csc_blocks[x.k]
 
-  function innerkernel!(Y,L,X,I,J,COO,CSR,CSC)
+  @inline function innerkernel!(Y,L,X,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -826,7 +826,7 @@ function Base.:*(l::AdjointCore{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d},
     end
   end
 
-  function outerkernel!(Y,L,x,nup,ndn,I,J,COO,CSR,CSC)
+  @inline function outerkernel!(Y,L,x,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
       if in_row_qn(mup, mdn, x)
         in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, L, ○○(x,mup,mdn), I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
@@ -837,19 +837,17 @@ function Base.:*(l::AdjointCore{T,Nup,Ndn,d}, H::SparseHamiltonian{T,Nup,Ndn,d},
     end
   end
 
-  @sync begin
-    for (nup,ndn) in it_○○(parent(l))
-      @Threads.spawn outerkernel!(block(y,nup  ,ndn  ), ○○(l,nup  ,ndn  ), x, nup, ndn, I[nup,ndn], J[nup  ,ndn  ], COO.○○[nup,ndn], CSR.○○[nup,ndn], CSC.○○[nup,ndn])
-    end
-    for (nup,ndn) in it_up(parent(l))
-      @Threads.spawn outerkernel!(block(y,nup+1,ndn  ), up(l,nup+1,ndn  ), x, nup, ndn, I[nup,ndn], J[nup+1,ndn  ], COO.up[nup,ndn], CSR.up[nup,ndn], CSC.up[nup,ndn])
-    end
-    for (nup,ndn) in it_dn(parent(l))
-      @Threads.spawn outerkernel!(block(y,nup  ,ndn+1), dn(l,nup  ,ndn+1), x, nup, ndn, I[nup,ndn], J[nup  ,ndn+1], COO.dn[nup,ndn], CSR.dn[nup,ndn], CSC.dn[nup,ndn])
-    end
-    for (nup,ndn) in it_●●(parent(l))
-      @Threads.spawn outerkernel!(block(y,nup+1,ndn+1), ●●(l,nup+1,ndn+1), x, nup, ndn, I[nup,ndn], J[nup+1,ndn+1], COO.●●[nup,ndn], CSR.●●[nup,ndn], CSC.●●[nup,ndn])
-    end
+  @sync for (nup,ndn) in it_○○(parent(l))
+    @Threads.spawn outerkernel!(block(y,nup  ,ndn  ), ○○(l,nup  ,ndn  ), x, nup, ndn, I[nup,ndn], J[nup  ,ndn  ], COO.○○[nup,ndn], CSR.○○[nup,ndn], CSC.○○[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_up(parent(l))
+    @Threads.spawn outerkernel!(block(y,nup+1,ndn  ), up(l,nup+1,ndn  ), x, nup, ndn, I[nup,ndn], J[nup+1,ndn  ], COO.up[nup,ndn], CSR.up[nup,ndn], CSC.up[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_dn(parent(l))
+    @Threads.spawn outerkernel!(block(y,nup  ,ndn+1), dn(l,nup  ,ndn+1), x, nup, ndn, I[nup,ndn], J[nup  ,ndn+1], COO.dn[nup,ndn], CSR.dn[nup,ndn], CSC.dn[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_●●(parent(l))
+    @Threads.spawn outerkernel!(block(y,nup+1,ndn+1), ●●(l,nup+1,ndn+1), x, nup, ndn, I[nup,ndn], J[nup+1,ndn+1], COO.●●[nup,ndn], CSR.●●[nup,ndn], CSC.●●[nup,ndn])
   end
 
   return y
@@ -868,7 +866,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
   CSC = H.csc_blocks[x.k]
 
 
-  function innerkernel!(Y,X,R,I,J,COO,CSR,CSC)
+  @inline function innerkernel!(Y,X,R,I,J,COO,CSR,CSC)
     nnz = length(COO[1])
     nrow = length(CSR[1])
     ncol = length(CSC[1])
@@ -908,7 +906,7 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
     end
   end
 
-  function outerkernel!(Y,x,R,nup,ndn,I,J,COO,CSR,CSC)
+  @inline function outerkernel!(Y,x,R,nup,ndn,I,J,COO,CSR,CSC)
     for mup=max(1,nup-2):min(Nup+1,nup+2), mdn=max(1,ndn-2):min(Ndn+1,ndn+2)
       if in_row_qn(mup, mdn, x)
         in_col_qn(mup  ,mdn  ,x) && innerkernel!(Y, ○○(x,mup,mdn), R, I, J, COO.○○[mup,mdn], CSR.○○[mup,mdn], CSC.○○[mup,mdn])
@@ -919,19 +917,17 @@ function Base.:*(H::SparseHamiltonian{T,Nup,Ndn,d}, x::SparseCore{T,Nup,Ndn,d}, 
     end
   end
 
-  @sync begin
-    for (nup,ndn) in it_○○(parent(r))
-      @Threads.spawn outerkernel!(block(y,nup,ndn), x, ○○(r,nup  ,ndn  ), nup, ndn, I[nup,ndn], J[nup  ,ndn  ], COO.○○[nup,ndn], CSR.○○[nup,ndn], CSC.○○[nup,ndn])
-    end
-    for (nup,ndn) in it_up(parent(r))
-      @Threads.spawn outerkernel!(block(y,nup,ndn), x, up(r,nup+1,ndn  ), nup, ndn, I[nup,ndn], J[nup+1,ndn  ], COO.up[nup,ndn], CSR.up[nup,ndn], CSC.up[nup,ndn])
-    end
-    for (nup,ndn) in it_dn(parent(r))
-      @Threads.spawn outerkernel!(block(y,nup,ndn), x, dn(r,nup  ,ndn+1), nup, ndn, I[nup,ndn], J[nup  ,ndn+1], COO.dn[nup,ndn], CSR.dn[nup,ndn], CSC.dn[nup,ndn])
-    end
-    for (nup,ndn) in it_●●(parent(r))
-      @Threads.spawn outerkernel!(block(y,nup,ndn), x, ●●(r,nup+1,ndn+1), nup, ndn, I[nup,ndn], J[nup+1,ndn+1], COO.●●[nup,ndn], CSR.●●[nup,ndn], CSC.●●[nup,ndn])
-    end
+  @sync for (nup,ndn) in it_○○(parent(r))
+    @Threads.spawn outerkernel!(block(y,nup,ndn), x, ○○(r,nup  ,ndn  ), nup, ndn, I[nup,ndn], J[nup  ,ndn  ], COO.○○[nup,ndn], CSR.○○[nup,ndn], CSC.○○[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_up(parent(r))
+    @Threads.spawn outerkernel!(block(y,nup,ndn), x, up(r,nup+1,ndn  ), nup, ndn, I[nup,ndn], J[nup+1,ndn  ], COO.up[nup,ndn], CSR.up[nup,ndn], CSC.up[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_dn(parent(r))
+    @Threads.spawn outerkernel!(block(y,nup,ndn), x, dn(r,nup  ,ndn+1), nup, ndn, I[nup,ndn], J[nup  ,ndn+1], COO.dn[nup,ndn], CSR.dn[nup,ndn], CSC.dn[nup,ndn])
+  end
+  @sync for (nup,ndn) in it_●●(parent(r))
+    @Threads.spawn outerkernel!(block(y,nup,ndn), x, ●●(r,nup+1,ndn+1), nup, ndn, I[nup,ndn], J[nup+1,ndn+1], COO.●●[nup,ndn], CSR.●●[nup,ndn], CSC.●●[nup,ndn])
   end
   
   return y

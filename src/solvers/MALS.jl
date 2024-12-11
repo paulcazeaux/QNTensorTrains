@@ -8,21 +8,30 @@ H = Σ t_ij a†_i a_j + Σ v_ijkl a†_i a†_j a_k a_l
 The algorithm adapts ranks: the result will not necessarily have the
 same ranks as the initial guess `x0`.
 """
-function MALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}, ε::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,Nup,Ndn,d}
+function MALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}; ε::Float64 = 1e-4, maxIter::Int = 20, verbosity::Bool=false) where {T<:Number,Nup,Ndn,d}
   x = deepcopy(x0)
-  λ, x = MALS!(H,x,ε,maxIter)
+  λ, x = MALS!(H,x,ε,maxIter,verbosity)
 
   return λ, x
 end
 
-function MALS!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, maxIter::Int) where {T<:Number,Nup,Ndn,d}
+function MALS!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, maxIter::Int, verbosity::Bool) where {T<:Number,Nup,Ndn,d}
   # Right-orthogonalize the tensor x if necessary
   x.corePosition == 1 || rightOrthogonalize!(x, keepRank=true) 
 
   λ = RayleighQuotient(H,x)
   for it in 1:maxIter
-    _ = MALSForwardSweep!(H,x,ε)
-    λn = MALSBackSweep!(H,x,ε)
+    if verbosity 
+      println("Forward Sweep $(it)...")
+      @time λn = MALSForwardSweep!(H,x,ε)
+      println("Energy $(λn), relative improvement $(abs(λ-λn)/abs(λn))")
+      println("Backward Sweep $(it)...")
+      @time λn = MALSBackSweep!(H,x,ε)
+      println("Energy $(λn), relative improvement $(abs(λ-λn)/abs(λn))")
+    else
+      MALSForwardSweep!(H,x,ε)
+      λn = MALSBackSweep!(H,x,ε)
+    end
     r = abs(λ-λn)/abs(λn)
     λ = λn
     r < ε && break
@@ -43,7 +52,6 @@ function MALSForwardSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,
     # Assumption: `x` is orthogonal with core at `k`
     @boundscheck @assert x.corePosition == k
     # Compute new cores.
-    x₀ = contract(x.cores[k],x.cores[k+1])
     vals, vecs, info = KrylovKit.eigsolve(
                           core_pair -> FramedHamiltonian(H, core_pair,Fᴸ,Fᴿ[k+1]), 
                           contract(x.cores[k],x.cores[k+1]), 1, :SR;
@@ -66,7 +74,7 @@ function MALSForwardSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,
 end
 
 function MALSBackSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, inner_tol::T = 1e-6) where {T<:Number,Nup,Ndn,d}
-  move_core!(x, d-1; keepRank=false) # Right-orthogonalize the tensor x
+  move_core!(x, d-1; keepRank=false) # Left-orthogonalize the tensor x
   Fᴸ = LeftToRightFraming(H,x)
   Fᴿ = IdFrame(Val(d), Val(Nup), Val(Ndn), d+1)
   Fᴿ = FramingStepLeft(H,x,Fᴿ)
@@ -78,7 +86,6 @@ function MALSBackSweep!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn
     @boundscheck @assert x.corePosition == k+1
 
     # Compute new cores.
-    x₀ = contract(x.cores[k],x.cores[k+1])
     vals, vecs, info = KrylovKit.eigsolve(
                           core_pair -> FramedHamiltonian(H,core_pair,Fᴸ[k],Fᴿ), 
                           contract(x.cores[k],x.cores[k+1]), 1, :SR;

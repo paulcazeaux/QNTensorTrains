@@ -50,8 +50,8 @@ function roundRandOrth2!(x::TTvector{T,Nup,Ndn,d}, m::Int) where {T<:Number,Nup,
   for k=1:d+1, (nup,ndn) in QNTensorTrains.state_qn(Nup,Ndn,d,k)
     target_r[k][nup,ndn] = min(m, binomial(k-1,nup-1)*binomial(k-1,ndn-1), binomial(d+1-k,Nup+1-nup)*binomial(d+1-k,Ndn+1-ndn))
   end
-  @assert target_r[  1][1,1] == rank(x,1,0)
-  @assert target_r[d+1][Nup+1,Ndn+1] == rank(x,d+1,Nup+1,Ndn+1)
+  @assert target_r[  1][1,1] == rank(x,1,(1,1))
+  @assert target_r[d+1][Nup+1,Ndn+1] == rank(x,d+1,(Nup+1,Ndn+1))
 
   # Initialize tensor cores array for the result
   cores = Vector{SparseCore{T,Nup,Ndn,d,Matrix{T}}}(undef,d)

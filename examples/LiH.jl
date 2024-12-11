@@ -67,13 +67,13 @@ plot(cumsum(length.([hist1, hist2, hist3]).-1), abs.(last.([hist1, hist2, hist3]
             label="Final eigenvalue error (before restart)",
             legend=:bottomleft)
 scatter!([res1;res2;res3], label="Residual")
-scatter!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 50")
+scatter!(abs.(hist1[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 10")
 
 N = length(res1).+(1:length(res2))
-scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 100")
+scatter!(N, abs.(hist2[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 20")
 
 N = (length(res1)+length(res2)).+(1:length(res3))
-scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 150")
+scatter!(N, abs.(hist3[1:end-1] .- (e_tot - e_nuclear)), label="Ritz value accuracy, rmax = 30")
 xlabel!("Iterations")
 ylabel!("Error (Ha)")
 savefig("LiH_ccpvdz.pdf")

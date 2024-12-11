@@ -9,19 +9,28 @@ a two-body Hamiltonian given in second quantization format as:
 H = Σ t_ij a†_i a_j + Σ v_ijkl a†_i a†_j a_k a_l
 The result will have the same ranks as the initial guess `x0`.
 """
-function ALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}, ε::Float64 = 1e-4, maxIter::Int = 20) where {T<:Number,Nup,Ndn,d}
+function ALS(H::SparseHamiltonian{T,Nup,Ndn,d}, x0::TTvector{T,Nup,Ndn,d}; ε::Float64 = 1e-4, maxIter::Int = 20, verbosity::Bool=false) where {T<:Number,Nup,Ndn,d}
   x = deepcopy(x0)
-  return ALS!(H,x,ε,maxIter)
+  return ALS!(H,x,ε,maxIter,verbosity)
 end
 
-function ALS!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, maxIter::Int) where {T<:Number,Nup,Ndn,d}
+function ALS!(H::SparseHamiltonian{T,Nup,Ndn,d}, x::TTvector{T,Nup,Ndn,d}, ε::Float64, maxIter::Int, verbosity::Bool) where {T<:Number,Nup,Ndn,d}
   # Right-orthogonalize the tensor x if necessary
   x.corePosition == 1 || rightOrthogonalize!(x, keepRank=true)
 
   λ = RayleighQuotient(H,x)
-  for _ in 1:maxIter
-    _ = ALSForwardSweep!(H,x)
-    λn = ALSBackSweep!(H,x)
+  for it in 1:maxIter
+    if verbosity 
+      println("Forward Sweep $(it)...")
+      @time λn = ALSForwardSweep!(H,x,ε)
+      println("Energy $(λn), relative improvement $(abs(λ-λn)/abs(λn))")
+      println("Backward Sweep $(it)...")
+      @time λn = ALSBackSweep!(H,x,ε)
+      println("Energy $(λn), relative improvement $(abs(λ-λn)/abs(λn))")
+    else
+      ALSForwardSweep!(H,x,ε)
+      λn = ALSBackSweep!(H,x,ε)
+    end
     r = abs(λ-λn)/abs(λn)
     λ = λn
 
@@ -115,7 +124,7 @@ function FramingStepRight(H::SparseHamiltonian{T,Nup,Ndn,d},
                           Fᴸ::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
     k = site(Fᴸ)
     Xₖ = x.cores[k]
-    return (adjoint(Xₖ) * Fᴸ) * H * Xₖ
+    return adjoint(Xₖ) * (Fᴸ * H * Xₖ)
 end
 
 function FramingStepLeft(H::SparseHamiltonian{T,Nup,Ndn,d}, 
@@ -123,5 +132,5 @@ function FramingStepLeft(H::SparseHamiltonian{T,Nup,Ndn,d},
                           Fᴿ::Frame{T,Nup,Ndn,d}) where {T<:Number,Nup,Ndn,d}
     k = site(Fᴿ)-1
     Xₖ = x.cores[k]
-  return H * Xₖ * (Fᴿ * adjoint(Xₖ))
+  return (H * Xₖ * Fᴿ) * adjoint(Xₖ)
 end
